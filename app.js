@@ -445,6 +445,7 @@ $('#pointList').addEventListener('click', e => {
 });
 
 // ================= MATERIAL =================
+const matOpen = new Set();
 function renderMaterial() {
   const m = computeMaterial(S); const st = S.settings;
   let h = `<div class="card"><div class="grid2">
@@ -453,12 +454,19 @@ function renderMaterial() {
       <p class="mut">Angka otomatis dihitung dari tagging: tiang, konstruksi, skur/spunh guy/grounding pada tiang rencana; kabel = panjang ruas rencana/ganti × toleransi; trafo rencana. Tiang/konstruksi/trafo/kabel lama yang dibongkar atau diganti masuk <b>Pembongkaran</b>. Ketik angka di kolom <b>Pakai</b> untuk mengganti; kosongkan untuk kembali ke otomatis.</p>
       ${Object.entries(m.len).map(([k, v]) => `<div class="mut">Ukur ${esc(k)}: ${v.toFixed(1)} m</div>`).join('')}
       ${m.warn.map(w => `<div style="color:var(--warn);font-size:13px">⚠ ${esc(w)}</div>`).join('')}</div>
-    <div class="card" style="padding:0;overflow:hidden"><table class="m"><tr><th>Material</th><th>Otomatis</th><th>Pakai</th><th></th></tr>`;
+    <div class="card" style="padding:0;overflow:hidden"><table class="m"><tr><th>Material <span class="mut" style="font-weight:400">(ketuk untuk buka)</span></th><th>Otomatis</th><th>Pakai</th><th></th></tr>`;
+  const filled = rows => rows.filter(r => r.qty !== '' && r.qty != null && +r.qty !== 0).length;
   for (const s of m.sections) {
-    h += `<tr><th class="sec" colspan="4" style="background:${s.color}">${s.title}</th></tr>`;
+    const allRows = s.groups.flatMap(g => g.rows), nS = filled(allRows), openS = matOpen.has(s.key);
+    h += `<tr data-tog="${s.key}" style="cursor:pointer"><th class="sec" colspan="4" style="background:${s.color};padding:11px 8px">
+      ${openS ? '▾' : '▸'} ${s.title}<span style="float:right;font-weight:600">${nS ? nS + ' terisi' : ''}</span></th></tr>`;
+    if (!openS) continue;
     s.groups.forEach((g, gi) => {
-      h += `<tr><td colspan="4" style="background:#f4f5f7;font-weight:700;font-size:12.5px">${gi + 1}. ${esc(g.t)}</td></tr>`;
-      for (const r of g.rows) h += `<tr><td>${esc(r.name)}${r.extra ? ' <span class="pill gan">tambahan</span>' : ''}</td><td class="mut">${r.auto || '–'} ${r.auto ? r.unit : ''}</td>
+      const gk = s.key + '|' + g.t, nG = filled(g.rows), openG = matOpen.has(gk);
+      h += `<tr data-tog="${esc(gk)}" style="cursor:pointer"><td colspan="4" style="background:#f4f5f7;font-weight:700;font-size:13px;padding:10px 8px 10px 18px">
+        ${openG ? '▾' : '▸'} ${gi + 1}. ${esc(g.t)}<span style="float:right;color:var(--pri)">${nG ? nG + ' terisi' : ''}</span></td></tr>`;
+      if (!openG) return;
+      for (const r of g.rows) h += `<tr><td style="padding-left:30px">${esc(r.name)}${r.extra ? ' <span class="pill gan">tambahan</span>' : ''}</td><td class="mut">${r.auto || '–'} ${r.auto ? r.unit : ''}</td>
         <td><input inputmode="decimal" data-mat="${esc(r.key)}" value="${esc((S.material || {})[r.key] ?? '')}" placeholder="${r.auto || ''}"></td><td class="mut">${r.unit}</td></tr>`;
     });
   }
@@ -476,6 +484,9 @@ function renderMaterial() {
     const n = $('#exName').value.trim(); if (!n) return toast('Isi nama material');
     S.materialExtra[$('#exSec').value + '|' + n] = $('#exUnit').value; save(); renderMaterial();
   };
+  $('#matView').querySelectorAll('[data-tog]').forEach(tr => tr.onclick = () => {
+    const k = tr.dataset.tog; matOpen.has(k) ? matOpen.delete(k) : matOpen.add(k); renderMaterial();
+  });
   $('#matView').querySelectorAll('[data-mat]').forEach(inp => inp.onchange = () => {
     const k = inp.dataset.mat; if (inp.value === '') delete S.material[k]; else S.material[k] = inp.value;
     if (inp.value === '' && S.materialExtra[k] && !computeMaterial(S).sections.some(s => s.groups.some(g => g.rows.some(r => r.key === k && r.auto)))) {
