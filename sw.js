@@ -1,5 +1,5 @@
 // Service worker: aplikasi bisa dibuka offline, tile peta yang pernah dilihat disimpan
-const APP_CACHE = 'survei-app-v1';
+const APP_CACHE = 'survei-app-v2';
 const TILE_CACHE = 'survei-tiles-v1';
 const APP_FILES = ['./', './index.html', './app.js', './map.js', './sheet.js', './db.js',
   './manifest.json', './icon-192.png', './icon-512.png'];
@@ -7,7 +7,7 @@ const TILE_HOSTS = ['tile.openstreetmap.org', 'server.arcgisonline.com'];
 const MAX_TILES = 6000;
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(APP_CACHE).then(c => c.addAll(APP_FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(APP_CACHE).then(c => c.addAll(APP_FILES.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -43,7 +43,7 @@ self.addEventListener('fetch', e => {
   }
   if (url.origin === location.origin) {
     // network-first untuk file aplikasi (agar update terbaca), fallback ke cache saat offline
-    e.respondWith(fetch(e.request).then(res => {
+    e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(res => {
       const copy = res.clone();
       caches.open(APP_CACHE).then(c => c.put(e.request, copy));
       return res;

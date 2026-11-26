@@ -611,6 +611,6 @@ async function makePdf(share) {
 }
 
 // ================= mulai =================
-if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 showHome();
