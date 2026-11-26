@@ -2,7 +2,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const today = () => new Date().toISOString().slice(0, 10);
-const TYPES = { tiang: 'Tiang', gardu: 'Gardu', pelanggan: 'Pelanggan', label: 'Teks/arah', jalan: 'Jalan' };
+const TYPES = { jaringan: 'Titik jaringan', pelanggan: 'Pelanggan', label: 'Teks/arah', jalan: 'Jalan' };
 
 let G = loadSettings();
 let S = null;              // survei aktif
@@ -132,11 +132,11 @@ document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e =
 
 // ================= SURVEI =================
 function openSurvey(s) {
-  S = s; S.points ||= []; S.material ||= {}; S.materialExtra ||= {}; S.uraian ||= {}; S.settings ||= {};
+  S = s; S.points ||= []; S.points.forEach(migratePoint); if (S.lastType === 'tiang' || S.lastType === 'gardu') S.lastType = 'jaringan'; S.material ||= {}; S.materialExtra ||= {}; S.uraian ||= {}; S.settings ||= {};
   selected = null;
   $('#scHome').classList.remove('on'); $('#scSurvey').classList.add('on');
   $('#svTitle').textContent = S.judul || 'Survei';
-  if (!map) map = new SurveyMap($('#map'), { onTapPoint: id => { selected = id; refreshMap(); }, onTapEmpty: () => { selected = null; refreshMap(); } });
+  if (!map) map = new SurveyMap($('#map'), { label: mapLabel, onTapPoint: id => { selected = id; refreshMap(); }, onTapEmpty: () => { selected = null; refreshMap(); } });
   switchTab('tabMap');
   setTimeout(() => { map.resize(); if (!map.fit(S.points) && gpsFix) map.setView(gpsFix.lat, gpsFix.lng, 18); refreshMap(); }, 50);
   startGPS();
@@ -177,7 +177,7 @@ function setGpsChip(acc, msg) {
 function refreshMap() {
   if (!map || !S) return;
   map.setData(S.points, selected, gpsFix);
-  const par = defaultParent('tiang');
+  const par = defaultParent(S.lastType === 'jalan' ? 'jalan' : 'jaringan');
   $('#parentChip').style.display = S.points.length ? 'block' : 'none';
   $('#parentChip').textContent = par ? `Titik berikutnya tersambung ke: ${pointName(P(par))}` : 'Titik berikutnya: titik awal (tanpa induk)';
   const sc = $('#selCard'); const p = selected && P(selected);
@@ -193,14 +193,20 @@ function refreshMap() {
 }
 function pointName(p) {
   if (!p) return '';
-  return p.type === 'tiang' ? 'Tiang ' + (p.no || '') : p.type === 'gardu' ? (p.kode || 'Gardu') :
-    p.type === 'pelanggan' ? (p.nama || 'Pelanggan') : p.type === 'label' ? '"' + (p.teks || '').split('\n')[0] + '"' : 'Titik jalan';
+  if (p.type === 'jaringan') { const i = pointInfo(p); return hasTiang(i) ? 'Tiang ' + (p.no || '') : hasGardu(i) ? (p.kode || 'Gardu ' + (p.no || '')) : 'Titik ' + (p.no || ''); }
+  return p.type === 'pelanggan' ? (p.nama || 'Pelanggan') : p.type === 'label' ? '"' + (p.teks || '').split('\n')[0] + '"' : 'Titik jalan';
 }
 function describe(p) {
-  const st = { rencana: 'Rencana', eks: 'Eksisting', bongkar: 'Bongkar' }[p.status] || '';
-  if (p.type === 'tiang') return `${st} ${p.jenis || ''} ${p.tinggi || ''}m ${p.jar || ''} ${[...asArr(p.konsTM), ...asArr(p.konsTR)].join(' ')}`;
-  if (p.type === 'gardu') return `${st} ${p.dayaEks || ''}${p.dayaRencana ? '→' + p.dayaRencana : ''} kVA`;
-  return TYPES[p.type];
+  if (!isNet(p)) return TYPES[p.type] || '';
+  const i = pointInfo(p), e = [];
+  if (i.tiangEks) e.push('tiang eks ' + i.tiangEks);
+  if (i.garduEks) e.push('gardu eks ' + (i.garduEks.daya || '') + ' kVA');
+  const m = Object.keys(p.mat || {}).map(k => (k.startsWith('BONGKAR') ? 'bongkar ' : '') + keyName(k));
+  return [...m, ...e].join(', ') || 'belum ada material';
+}
+function mapLabel(p) {
+  if (p.type === 'jaringan') { const i = pointInfo(p); return hasTiang(i) ? 'T' + (p.no || '') : hasGardu(i) ? (p.kode || 'G') : ''; }
+  return p.type === 'pelanggan' ? (p.nama || 'Pelanggan') : p.type === 'label' ? (p.teks || '').split('\n')[0] : '';
 }
 $('#fabFollow').onclick = () => { follow = !follow; $('#fabFollow').classList.toggle('on', follow); if (follow && gpsFix) map.setView(gpsFix.lat, gpsFix.lng, Math.max(map.z, 18)); };
 $('#fabFit').onclick = () => { if (!map.fit(S.points)) toast('Belum ada titik'); };
@@ -232,36 +238,37 @@ $('#lockNow').onclick = finishLock;
 $('#lockCancel').onclick = () => { clearInterval(lockState.timer); lockState = null; $('#lockOv').classList.remove('on'); };
 $('#btnTagCenter').onclick = () => { const c = map.toLatLng(map.w / 2, map.h / 2); addPoint(c.lat, c.lng, null, 'manual'); };
 
-function lastOf(type) { for (let i = S.points.length - 1; i >= 0; i--) if (!type || S.points[i].type === type) return S.points[i]; return null; }
-function defaultParent(type) {
+function defaultParent(type, exclude) {
   if (type === 'label') return null;
-  if (selected && P(selected)) {
+  const ok = q => q.id !== exclude && (type === 'jalan' ? q.type === 'jalan' : q.type === 'jaringan');
+  if (selected && P(selected) && selected !== exclude) {
     const s = P(selected);
-    if (type === 'jalan' ? s.type === 'jalan' : s.type !== 'jalan' && s.type !== 'label') return s.id;
+    if (type === 'jalan' ? s.type === 'jalan' : isNet(s)) return s.id;
   }
-  for (let i = S.points.length - 1; i >= 0; i--) {
-    const q = S.points[i];
-    if (type === 'jalan' ? q.type === 'jalan' : q.type !== 'jalan' && q.type !== 'label' && q.type !== 'pelanggan') return q.id;
-  }
+  for (let i = S.points.length - 1; i >= 0; i--) if (ok(S.points[i])) return S.points[i].id;
   return null;
 }
-function nextNo() { const ns = S.points.filter(p => p.type === 'tiang').map(p => parseInt(p.no) || 0); return String(ns.length ? Math.max(...ns) + 1 : 1); }
+function nextNo() { const ns = S.points.filter(p => p.type === 'jaringan').map(p => parseInt(p.no) || 0); return String(ns.length ? Math.max(...ns) + 1 : 1); }
+const COPY_GROUPS = ['TIANG', 'KABEL', 'KONSTRUKSI'];
 function addPoint(lat, lng, acc, src) {
-  const lastT = S.lastType || 'tiang';
-  const tmpl = lastOf(lastT) || {};
-  const lastNet = [...S.points].reverse().find(p => p.type !== 'jalan' && p.type !== 'label') || {};
-  const p = {
-    id: uid(), type: lastT, lat, lng, acc, src, time: Date.now(), photos: [],
-    status: tmpl.status || 'rencana', jenis: tmpl.jenis || 'beton', tinggi: tmpl.tinggi || 9,
-    jar: tmpl.jar || lastNet.jar || 'TR', konsTM: asArr(tmpl.konsTM), konsTR: asArr(tmpl.konsTR), tipe: tmpl.tipe,
-    segStatus: tmpl.segStatus || lastNet.segStatus || 'rencana', hantar: tmpl.hantar || lastNet.hantar || 'JTR 70 mm', hantarLama: tmpl.hantarLama || lastNet.hantarLama || '',
-    phasa: tmpl.phasa || '3',
-  };
-  if (p.type === 'tiang') p.no = nextNo();
-  if (p.type === 'label') p.teks = tmpl.teks || 'ARAH ';
-  p.parent = defaultParent(p.type);
+  const type = S.lastType || 'jaringan';
+  const p = { id: uid(), type, lat, lng, acc, src, time: Date.now(), photos: [], mat: {}, eks: { jar: [], hantar: {} } };
+  let copied = false;
+  if (type === 'jaringan') {
+    p.no = nextNo();
+    const last = [...S.points].reverse().find(q => q.type === 'jaringan');
+    if (last) {
+      for (const [k, v] of Object.entries(last.mat || {})) {
+        const [sec, grp] = k.split('|');
+        if ((sec === 'HUTM' || sec === 'HUTR') && COPY_GROUPS.includes(grp)) { p.mat[k] = grp === 'KABEL' ? 'auto' : v; copied = true; }
+      }
+      p.eks.jar = asArr((last.eks || {}).jar);
+    }
+  }
+  if (type === 'label') p.teks = 'ARAH ';
+  p.parent = defaultParent(type);
   S.points.push(p); selected = p.id; save(); refreshMap();
-  toast(`${pointName(p)} tersimpan${acc != null ? ' (±' + Math.round(acc) + ' m)' : ' (posisi tengah peta)'}`);
+  toast(`${pointName(p)} tersimpan${acc != null ? ' (±' + Math.round(acc) + ' m)' : ' (posisi tengah peta)'}${copied ? ' · material disalin dari titik sebelumnya' : ''}`, 3000);
   openEditor(p.id, true);
 }
 
@@ -269,72 +276,87 @@ function addPoint(lat, lng, acc, src) {
 function opt(list, v) { return list.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(val)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(lab)}</option>`; }).join(''); }
 function multiChips(name, list, v, suf = '') { const a = asArr(v); return `<div class="chips" data-multi="${name}">${list.map(x => `<button type="button" class="chip ${a.includes(x) ? 'on' : ''}" data-v="${esc(x)}">${esc(x + suf)}</button>`).join('')}</div>`; }
 function chips(name, list, v) { return `<div class="chips" data-chips="${name}">${list.map(([val, lab]) => `<button type="button" class="chip ${String(v) === String(val) ? 'on' : ''}" data-v="${esc(val)}">${esc(lab)}</button>`).join('')}</div>`; }
+const edOpen = new Set();
+function autoLenText(p, key) {
+  const L = segLen(S, p); if (!L) return 'butuh induk';
+  if (key.startsWith('BONGKAR')) return Math.round(L) + ' m';
+  const st = S.settings || {}, tol = +(st.toleransi ?? 3), b = +(st.bulat ?? 1) || 1;
+  return Math.ceil(L * (1 + tol / 100) / b) * b + ' m';
+}
+function materialPicker(p) {
+  const m = p.mat || {}; const cat = catalog(S);
+  const sel = Object.entries(m);
+  let h = `<div class="selbox">${sel.length ? sel.map(([k, v]) => `<span class="selchip">${k.startsWith('BONGKAR') ? 'Bongkar ' : ''}${esc(keyName(k))}${keyGroup(k) === 'KABEL' ? ' · ' + (v === 'auto' ? autoLenText(p, k) : v + ' m') : +v > 1 ? ' ×' + v : ''}<button data-unsel="${esc(k)}">✕</button></span>`).join('')
+    : '<span class="mut">Belum ada material. Ketuk kelompok di bawah untuk memilih (boleh lebih dari satu).</span>'}</div>`;
+  h += '<div class="acc">';
+  for (const s of cat) {
+    const nS = sel.filter(([k]) => k.startsWith(s.key + '|')).length, oS = edOpen.has(s.key);
+    h += `<div class="acch" data-ed="${s.key}" style="background:${s.color}">${oS ? '▾' : '▸'} ${s.title}<span>${nS ? nS + ' dipilih' : ''}</span></div>`;
+    if (!oS) continue;
+    s.groups.forEach((g, gi) => {
+      const gk = s.key + '|' + g.t, nG = sel.filter(([k]) => k.startsWith(gk + '|')).length, oG = edOpen.has(gk);
+      h += `<div class="accg" data-ed="${esc(gk)}">${oG ? '▾' : '▸'} ${gi + 1}. ${esc(g.t)}<span>${nG ? nG + ' dipilih' : ''}</span></div>`;
+      if (!oG) return;
+      for (const r of g.rows) {
+        const on = r.key in m, v = m[r.key];
+        const kab = g.t === 'KABEL';
+        const q = !on ? `<span class="mut">${r.unit}</span>` : kab
+          ? `<input class="q" data-q="${esc(r.key)}" inputmode="decimal" value="${v === 'auto' ? '' : esc(v)}" placeholder="${esc(autoLenText(p, r.key))}"><span class="mut">m</span>`
+          : `<input class="q" data-q="${esc(r.key)}" inputmode="decimal" value="${esc(v)}"><span class="mut">${r.unit}</span>`;
+        h += `<div class="mi ${on ? 'on' : ''}" data-mi="${esc(r.key)}"><span class="ck">${on ? '✓' : ''}</span><span class="grow">${esc(r.name)}</span>${q}</div>`;
+      }
+    });
+  }
+  return h + '</div>';
+}
+function section(key, title, body) {
+  const o = edOpen.has(key);
+  return `<div class="acch plain" data-ed="${key}">${o ? '▾' : '▸'} ${title}</div>${o ? `<div class="accbody">${body}</div>` : ''}`;
+}
 async function openEditor(id, fresh) {
   editing = id; const p = P(id); if (!p) return;
-  const others = S.points.filter(q => q.id !== id && (p.type === 'jalan' ? q.type === 'jalan' : q.type !== 'jalan' && q.type !== 'label'));
-  const isNet = p.type !== 'jalan' && p.type !== 'label';
-  const seg = isNet && p.parent;
-  let h = `<div class="row"><h2 class="grow">${fresh ? 'Titik baru: ' : ''}${esc(pointName(p))}</h2><button class="btn sm" data-act="close">Selesai</button></div>
-    <div class="mut">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)} ${p.acc != null ? '(±' + Math.round(p.acc) + ' m)' : '(posisi manual)'}</div>
-    <label class="f">Jenis titik</label>${chips('type', Object.entries(TYPES), p.type)}`;
-  if (p.type === 'tiang') {
-    h += `<label class="f">Status</label>${chips('status', [['rencana', 'Rencana (baru)'], ['eks', 'Eksisting'], ['bongkar', 'Dibongkar']], p.status)}
-      <div class="grid2">
-        <div><label class="f">No. tiang</label><input class="i" data-k="no" value="${esc(p.no)}"></div>
-        <div><label class="f">Jaringan</label><select class="i" data-k="jar">${opt([['TR', 'TR (HUTR)'], ['TM', 'TM (HUTM)']], p.jar)}</select></div>
-        <div><label class="f">Jenis tiang</label>${chips('jenis', [['beton', 'Beton'], ['besi', 'Besi'], ['kayu', 'Kayu']], p.jenis)}</div>
-        <div><label class="f">Tinggi (m)</label>${chips('tinggi', [['9', '9'], ['12', '12'], ['11', '11'], ['13', '13']], p.tinggi)}</div>
-      </div>
-      ${p.status === 'eks' ? '' : `<label class="f">Konstruksi TM ${p.status === 'bongkar' ? '(dibongkar)' : ''} – boleh lebih dari satu</label>${multiChips('konsTM', KONS_TM, p.konsTM)}
-      <label class="f">Konstruksi TR ${p.status === 'bongkar' ? '(dibongkar)' : ''}</label>${multiChips('konsTR', KONS_TR, p.konsTR, ' TR')}`}
-      ${p.status === 'bongkar' ? '' : `<div class="row" style="margin-top:10px;gap:14px">
-        <label><input type="checkbox" data-k="skur" ${p.skur ? 'checked' : ''}> Skur ${esc(p.jar)}</label>
-        <label><input type="checkbox" data-k="spanGuy" ${p.spanGuy ? 'checked' : ''}> Spunh Guy ${esc(p.jar)}</label>
-        <label><input type="checkbox" data-k="grounding" ${p.grounding ? 'checked' : ''}> Grounding</label></div>`}
-      ${p.status !== 'rencana' ? `<label style="display:block;margin-top:8px"><input type="checkbox" data-k="showBubble" ${p.showBubble ? 'checked' : ''}> Tampilkan label nomor di gambar</label>` : ''}`;
-  } else if (p.type === 'gardu') {
-    h += `<label class="f">Status</label>${chips('status', [['eks', 'Eksisting'], ['rencana', 'Rencana gardu baru'], ['bongkar', 'Dibongkar']], p.status)}
-      <div class="grid2">
-        <div><label class="f">Kode gardu</label><input class="i" data-k="kode" value="${esc(p.kode)}" placeholder="TH 10"></div>
-        <div><label class="f">Phasa</label><select class="i" data-k="phasa">${opt([['3', '3 phasa'], ['1', '1 phasa']], p.phasa)}</select></div>
-        <div><label class="f">Daya eksisting (kVA)</label><select class="i" data-k="dayaEks">${opt([['', '–'], 25, 50, 100, 160, 200, 250], p.dayaEks || '')}</select></div>
-        ${p.status === 'bongkar' ? '' : `<div><label class="f">Daya rencana (kVA)</label><select class="i" data-k="dayaRencana">${opt([['', '– tidak ada –'], 25, 50, 100, 160, 250], p.dayaRencana || '')}</select></div>`}
-      </div>
-      ${p.dayaRencana && p.status !== 'bongkar' ? `<label class="f">Konstruksi gardu rencana</label>${chips('tipe', [['SINGLE POLE', 'Single pole'], ['DOUBLE POLE', 'Double pole']], tipeGardu(p))}` : ''}
-      <p class="mut">Daya rencana diisi bila uprating / gardu baru → trafo masuk Gardu Distribusi; trafo lama (uprating/bongkar) otomatis masuk Pembongkaran.</p>`;
-  } else if (p.type === 'pelanggan') {
-    h += `<div class="grid2"><div><label class="f">Nama / ID pelanggan</label><input class="i" data-k="nama" value="${esc(p.nama)}"></div>
+  const sc = $('#ptSheet').scrollTop;
+  p.mat ||= {}; p.eks ||= { jar: [], hantar: {} };
+  const others = S.points.filter(q => q.id !== id && (p.type === 'jalan' ? q.type === 'jalan' : isNet(q)));
+  const q = p.parent && P(p.parent);
+  const info = pointInfo(p);
+  let h = `<div class="row"><h2 class="grow">${fresh ? 'Titik baru: ' : ''}${esc(pointName(p))}</h2>
+    ${p.type !== 'label' && p.type !== 'jalan' ? `<button class="btn sm" data-act="photo">📷 Foto${(p.photos || []).length ? ' (' + p.photos.length + ')' : ''}</button>` : ''}
+    <button class="btn pri sm" data-act="close">Selesai</button></div>
+    <div class="mut">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)} ${p.acc != null ? '(±' + Math.round(p.acc) + ' m)' : '(manual)'}${q ? ` · ${haversine(q, p).toFixed(1)} m dari ${esc(pointName(q))}` : ''}</div>
+    <div style="margin:8px 0">${chips('type', Object.entries(TYPES), p.type)}</div>`;
+  if (isNet(p)) {
+    h += `<label class="f" style="font-weight:700;color:var(--tx)">Material di titik ini</label>` + materialPicker(p);
+    let eks = '';
+    if (p.type === 'jaringan') {
+      eks += `<label class="f">Tiang eksisting</label>${chips('eks.tiang', [['', 'Tidak ada'], ['beton', 'Beton'], ['besi', 'Besi'], ['kayu', 'Kayu']], p.eks.tiang || '')}
+        <label style="display:block;margin-top:8px"><input type="checkbox" data-k="eks.gardu" ${p.eks.gardu ? 'checked' : ''}> Ada gardu eksisting</label>
+        ${p.eks.gardu ? `<label class="f">Daya gardu eksisting (kVA)</label>${chips('eks.dayaGardu', [25, 50, 100, 160, 200, 250].map(d => [String(d), d]), p.eks.dayaGardu || '')}` : ''}`;
+    }
+    eks += `<label class="f">Jaringan eksisting dari ${q ? esc(pointName(q)) : 'induk'}</label>${multiChips('eks.jar', ['TM', 'TR'], p.eks.jar)}
+      <p class="mut">Jika ruas ini dipilih kabel baru, garis tergambar sebagai rencana. Kabel lama yang diganti, pilih di Pembongkaran › Kabel.</p>`;
+    h += section('ed.eks', 'Kondisi eksisting', eks);
+    let det = '';
+    if (p.type === 'jaringan') det += `<div class="grid2"><div><label class="f">No. tiang / titik</label><input class="i" data-k="no" value="${esc(p.no)}"></div>
+      ${hasGardu(info) ? `<div><label class="f">Kode gardu</label><input class="i" data-k="kode" value="${esc(p.kode)}" placeholder="TH 10"></div>` : '<div></div>'}</div>
+      ${hasTiang(info) && !info.tiangBaru ? `<label style="display:block;margin-top:8px"><input type="checkbox" data-k="showBubble" ${p.showBubble ? 'checked' : ''}> Tampilkan label nomor tiang di gambar</label>` : ''}`;
+    if (p.type === 'pelanggan') det += `<div class="grid2"><div><label class="f">Nama / ID pelanggan</label><input class="i" data-k="nama" value="${esc(p.nama)}"></div>
       <div><label class="f">Daya mohon (VA)</label><input class="i" data-k="dayaMohon" value="${esc(p.dayaMohon)}"></div></div>`;
+    det += `<label class="f">Tersambung dari (induk)</label><select class="i" data-k="parent">${opt([['', '– titik awal / tidak tersambung –'], ...others.map(o => [o.id, pointName(o)])], p.parent || '')}</select>
+      <label class="f">Catatan rencana (tampil di gambar dengan panah)</label>
+      <textarea class="i" data-k="ket" placeholder="mis. RENCANA UPRATING TRAFO 50 KVA MENJADI 100 KVA">${esc(p.ket)}</textarea>
+      <label style="display:block;margin-top:8px"><input type="checkbox" data-k="showKoord" ${p.showKoord ? 'checked' : ''}> Tampilkan titik koordinat di gambar</label>`;
+    h += section('ed.det', `Detail titik${p.ket ? ' · ada catatan' : ''}`, det);
+    h += `<div class="thumbs" id="thumbs"></div>`;
   } else if (p.type === 'label') {
     h += `<label class="f">Teks pada gambar (contoh: ARAH GUNUNGSITOLI)</label><textarea class="i" data-k="teks">${esc(p.teks)}</textarea>`;
-  } else if (p.type === 'jalan') {
-    h += `<p class="mut">Titik jalan disambung jadi garis jalan pada gambar. Tag sepanjang tepi jalan.</p>`;
-  }
-  if (p.type !== 'label') {
-    h += `<label class="f">Tersambung dari (induk)</label><select class="i" data-k="parent">${opt([['', '– titik awal / tidak tersambung –'], ...others.map(q => [q.id, pointName(q)])], p.parent || '')}</select>`;
-  }
-  if (seg) {
-    const hl = p.jar === 'TM' ? HANTAR_TM : HANTAR_TR;
-    const q = P(p.parent);
-    h += `<div class="card" style="margin-top:10px;background:#f8fafc">
-      <b>Ruas ${esc(pointName(q))} → ${esc(pointName(p))}: ${haversine(q, p).toFixed(1)} m</b>
-      ${p.type !== 'tiang' ? `<label class="f">Jaringan</label><select class="i" data-k="jar">${opt([['TR', 'TR (HUTR)'], ['TM', 'TM (HUTM)']], p.jar)}</select>` : ''}
-      <label class="f">Status ruas</label>${chips('segStatus', [['rencana', 'Rencana baru'], ['ganti', 'Ganti kabel'], ['eks', 'Eksisting'], ['bongkar', 'Bongkar']], p.segStatus)}
-      ${p.segStatus === 'rencana' || p.segStatus === 'ganti' ? `<label class="f">Penghantar ${p.segStatus === 'ganti' ? 'baru' : ''}</label><select class="i" data-k="hantar">${opt(hl, p.hantar)}</select>` : `<label class="f">Penghantar ${p.segStatus === 'bongkar' ? 'yang dibongkar' : 'eksisting'}</label><select class="i" data-k="hantar">${opt(['', ...hl], p.hantar)}</select>`}
-      ${p.segStatus === 'ganti' ? `<label class="f">Penghantar lama</label><select class="i" data-k="hantarLama">${opt(['', ...hl], p.hantarLama)}</select>` : ''}
-    </div>`;
-  }
-  if (p.type !== 'jalan' && p.type !== 'label') {
-    h += `<label class="f">Catatan rencana (tampil di gambar dengan panah)</label>
-      <textarea class="i" data-k="ket" placeholder="mis. RENCANA UPRATING TRAFO 50 KVA MENJADI 100 KVA">${esc(p.ket)}</textarea>
-      <label style="display:block;margin-top:8px"><input type="checkbox" data-k="showKoord" ${p.showKoord ? 'checked' : ''}> Tampilkan titik koordinat di gambar</label>
-      <label class="f">Foto (${(p.photos || []).length})</label>
-      <button class="btn pri" data-act="photo" style="width:100%">📷 Ambil foto</button>
-      <div class="thumbs" id="thumbs"></div>`;
+  } else {
+    h += `<p class="mut">Titik jalan disambung jadi garis jalan pada gambar. Tag sepanjang tepi jalan.</p>
+      <label class="f">Tersambung dari</label><select class="i" data-k="parent">${opt([['', '– awal jalan –'], ...others.map(o => [o.id, pointName(o)])], p.parent || '')}</select>`;
   }
   h += `<div class="row" style="margin-top:14px"><button class="btn red" data-act="del">Hapus titik</button><span class="grow"></span>
     <button class="btn" data-act="move">Pindah ke posisi GPS</button><button class="btn pri" data-act="close">Selesai</button></div>`;
-  $('#ptSheet').innerHTML = h; $('#mdPoint').classList.add('on');
+  $('#ptSheet').innerHTML = h; $('#mdPoint').classList.add('on'); $('#ptSheet').scrollTop = sc;
   const th = $('#thumbs');
   if (th) for (const f of p.photos || []) {
     const r = await DB.getPhoto(f); if (!r) continue;
@@ -343,28 +365,42 @@ async function openEditor(id, fresh) {
     th.appendChild(d);
   }
 }
-const rerenderKeys = new Set(['type', 'status', 'segStatus', 'jar', 'parent', 'dayaRencana']);
+function setK(p, k, v) { if (k.startsWith('eks.')) p.eks[k.slice(4)] = v; else p[k] = v; }
+function changed(p) { save(); refreshMap(); openEditor(p.id); }
 $('#ptSheet').addEventListener('click', async e => {
   const p = P(editing); if (!p) return;
+  if (e.target.closest('input,select,textarea')) return;
+  const ed = e.target.closest('[data-ed]');
+  if (ed) { const k = ed.dataset.ed; edOpen.has(k) ? edOpen.delete(k) : edOpen.add(k); openEditor(p.id); return; }
+  const un = e.target.closest('[data-unsel]');
+  if (un) { delete p.mat[un.dataset.unsel]; changed(p); return; }
+  const mi = e.target.closest('[data-mi]');
+  if (mi) {
+    const k = mi.dataset.mi;
+    if (k in p.mat) delete p.mat[k];
+    else {
+      p.mat[k] = keyGroup(k) === 'KABEL' ? 'auto' : 1;
+      if (k.startsWith('GARDU|') && !p.kode) edOpen.add('ed.det');
+    }
+    changed(p); return;
+  }
   const mc = e.target.closest('[data-multi] .chip');
   if (mc) {
-    const k = mc.parentElement.dataset.multi, v = mc.dataset.v; const arr = asArr(p[k]);
-    p[k] = arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v];
-    S.lastType = p.type; save(); refreshMap(); openEditor(p.id); return;
+    const k = mc.parentElement.dataset.multi, v = mc.dataset.v;
+    const arr = asArr(k.startsWith('eks.') ? p.eks[k.slice(4)] : p[k]);
+    setK(p, k, arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]); changed(p); return;
   }
   const chip = e.target.closest('[data-chips] .chip');
   if (chip) {
     const k = chip.parentElement.dataset.chips, v = chip.dataset.v;
-    if (k === 'type' && v !== p.type) {
+    if (k === 'type') {
+      if (v === p.type) return;
       p.type = v; S.lastType = v;
-      if (v === 'tiang' && !p.no) p.no = nextNo();
-      if (v === 'gardu' && !p.status) p.status = 'eks';
-      if (v === 'gardu' && p.status === 'rencana' && !p.kode) p.status = 'eks';
+      if (v === 'jaringan' && !p.no) p.no = nextNo();
       if (v === 'label') { p.parent = null; p.teks ||= 'ARAH '; }
-      else if (v === 'jalan' || (p.parent && P(p.parent) && P(p.parent).type === 'jalan')) p.parent = defaultParentExcluding(v, p.id);
-    } else if (k !== 'type') p[k] = k === 'tinggi' ? +v : v;
-    if (k === 'segStatus' && v === 'ganti' && !p.hantarLama) p.hantarLama = 'JTR 35 mm';
-    save(); refreshMap(); openEditor(p.id); return;
+      else if (!p.parent || (v === 'jalan') !== ((P(p.parent) || {}).type === 'jalan')) p.parent = defaultParent(v, p.id);
+    } else setK(p, k, v);
+    changed(p); return;
   }
   const b = e.target.closest('[data-act],[data-delphoto]'); if (!b) return;
   if (b.dataset.delphoto) {
@@ -377,7 +413,7 @@ $('#ptSheet').addEventListener('click', async e => {
   if (act === 'move') {
     if (!gpsFix) return toast('GPS belum siap');
     if (!confirm(`Pindahkan ${pointName(p)} ke posisi GPS sekarang (±${Math.round(gpsFix.acc)} m)?`)) return;
-    Object.assign(p, { lat: gpsFix.lat, lng: gpsFix.lng, acc: gpsFix.acc, src: 'gps' }); save(); refreshMap(); openEditor(p.id);
+    Object.assign(p, { lat: gpsFix.lat, lng: gpsFix.lng, acc: gpsFix.acc, src: 'gps' }); changed(p);
   }
   if (act === 'del') {
     const kids = S.points.filter(q => q.parent === p.id);
@@ -388,19 +424,18 @@ $('#ptSheet').addEventListener('click', async e => {
     $('#mdPoint').classList.remove('on'); refreshMap(); if ($('#tabPoints').classList.contains('on')) renderPoints();
   }
 });
-function defaultParentExcluding(type, id) {
-  for (let i = S.points.length - 1; i >= 0; i--) { const q = S.points[i]; if (q.id === id) continue;
-    if (type === 'jalan' ? q.type === 'jalan' : q.type !== 'jalan' && q.type !== 'label') return q.id; }
-  return null;
-}
 $('#ptSheet').addEventListener('change', e => {
-  const k = e.target.dataset.k; if (!k) return; const p = P(editing);
-  let v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  const p = P(editing); if (!p) return; const t = e.target;
+  if (t.dataset.q) {
+    const k = t.dataset.q, v = t.value.trim().replace(',', '.');
+    p.mat[k] = keyGroup(k) === 'KABEL' ? (v === '' ? 'auto' : +v || 'auto') : (+v > 0 ? +v : 1);
+    changed(p); return;
+  }
+  const k = t.dataset.k; if (!k) return;
+  let v = t.type === 'checkbox' ? t.checked : t.value;
   if (k === 'parent') { v = v || null; if (v && createsCycle(p.id, v)) { toast('Tidak bisa: sambungan melingkar'); openEditor(p.id); return; } }
-  if (k === 'jar') { const hl = v === 'TM' ? HANTAR_TM : HANTAR_TR; if (!hl.includes(p.hantar)) p.hantar = hl[0]; }
-  p[k] = v;
-  save(); refreshMap();
-  if (rerenderKeys.has(k)) openEditor(p.id);
+  setK(p, k, v); save(); refreshMap();
+  if (['parent', 'eks.gardu', 'showBubble'].includes(k)) openEditor(p.id);
 });
 function createsCycle(id, parent) { let c = parent, n = 0; while (c && n++ < 999) { if (c === id) return true; c = (P(c) || {}).parent; } return false; }
 
@@ -431,9 +466,11 @@ function renderPoints() {
   const pts = S.points;
   $('#pointList').innerHTML = pts.length ? pts.map(p => {
     const q = p.parent && P(p.parent);
-    const pill = p.status === 'bongkar' ? '<span class="pill gan">bongkar</span>' : p.status === 'rencana' ? '<span class="pill ren">rencana</span>' : p.type === 'tiang' || p.type === 'gardu' ? '<span class="pill eks">eksisting</span>' : '';
-    const sp = q ? `<span class="pill ${p.segStatus === 'eks' ? 'eks' : p.segStatus === 'rencana' ? 'ren' : 'gan'}">${p.segStatus}</span> ${haversine(q, p).toFixed(1)} m dari ${esc(pointName(q))}` : '';
-    return `<div class="card listpt" data-id="${p.id}"><div class="no">${p.type === 'tiang' ? 'T' + esc(p.no) : esc(TYPES[p.type].slice(0, 4))}</div>
+    const nM = Object.keys(p.mat || {}).length;
+    const pill = isNet(p) ? (nM ? `<span class="pill ren">${nM} material</span>` : '<span class="pill eks">eksisting</span>') : '';
+    const sp = q && isNet(p) ? netLines(p).filter(l => l.net !== '-').map(l => `<span class="pill ${l.status === 'eks' ? 'eks' : l.status === 'rencana' ? 'ren' : 'gan'}">${l.net === 'TM' ? 'JTM' : 'JTR'} ${l.status}</span>`).join(' ') + ` ${haversine(q, p).toFixed(1)} m dari ${esc(pointName(q))}` : '';
+    const code = p.type === 'jaringan' ? (mapLabel(p) || 'T' + (p.no || '')) : (TYPES[p.type] || '').slice(0, 4);
+    return `<div class="card listpt" data-id="${p.id}"><div class="no">${esc(code)}</div>
       <div class="grow"><b>${esc(pointName(p))}</b> ${pill}<div class="mut">${esc(describe(p))} · ${(p.photos || []).length} foto</div><div class="mut">${sp}</div></div>
       <button class="btn sm" data-loc="${p.id}">Peta</button></div>`;
   }).join('') : '<div class="empty">Belum ada titik. Buka tab Peta lalu tekan TAG TITIK.</div>';
@@ -451,7 +488,7 @@ function renderMaterial() {
   let h = `<div class="card"><div class="grid2">
       <div><label class="f">Toleransi kabel (%)</label><input class="i" id="mTol" type="number" value="${st.toleransi ?? 3}"></div>
       <div><label class="f">Pembulatan kabel (m)</label><input class="i" id="mBul" type="number" value="${st.bulat ?? 1}"></div></div>
-      <p class="mut">Angka otomatis dihitung dari tagging: tiang, konstruksi, skur/spunh guy/grounding pada tiang rencana; kabel = panjang ruas rencana/ganti × toleransi; trafo rencana. Tiang/konstruksi/trafo/kabel lama yang dibongkar atau diganti masuk <b>Pembongkaran</b>. Ketik angka di kolom <b>Pakai</b> untuk mengganti; kosongkan untuk kembali ke otomatis.</p>
+      <p class="mut">Total dari material yang dipilih di setiap titik. Kabel otomatis = panjang ruas dari induk × toleransi (kabel bongkar tanpa toleransi). Ketik angka di kolom <b>Pakai</b> untuk mengganti; kosongkan untuk kembali ke otomatis.</p>
       ${Object.entries(m.len).map(([k, v]) => `<div class="mut">Ukur ${esc(k)}: ${v.toFixed(1)} m</div>`).join('')}
       ${m.warn.map(w => `<div style="color:var(--warn);font-size:13px">⚠ ${esc(w)}</div>`).join('')}</div>
     <div class="card" style="padding:0;overflow:hidden"><table class="m"><tr><th>Material <span class="mut" style="font-weight:400">(ketuk untuk buka)</span></th><th>Otomatis</th><th>Pakai</th><th></th></tr>`;
@@ -546,7 +583,7 @@ async function renderPdfTab() {
   pv.onpointerdown = e => {
     const r = pv.getBoundingClientRect(), k = PAGE.w / r.width;
     const x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
-    const order = ['lbl', 'koord', 'note', 'sym'];
+    const order = ['lbl', 'glbl', 'koord', 'note', 'sym'];
     const hit = [...pvHits].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind))
       .find(h => x >= h.x - 4 && x <= h.x + h.w + 4 && y >= h.y - 4 && y <= h.y + h.h + 4);
     if (!hit) return;
@@ -559,7 +596,8 @@ async function renderPdfTab() {
     const x = (e.clientX - r.left) * drag.k, y = (e.clientY - r.top) * drag.k, dx = x - drag.x, dy = y - drag.y;
     drag.x = x; drag.y = y; const p = drag.p;
     if (drag.hit.kind === 'sym') { p.ox = (p.ox || 0) + dx; p.oy = (p.oy || 0) + dy; }
-    if (drag.hit.kind === 'lbl') { p.lx = (p.lx ?? (p.type === 'gardu' ? 14 : 0)) + dx; p.ly = (p.ly ?? (p.type === 'gardu' ? 0 : -34)) + dy; }
+    if (drag.hit.kind === 'lbl') { p.lx = (p.lx ?? 0) + dx; p.ly = (p.ly ?? -34) + dy; }
+    if (drag.hit.kind === 'glbl') { p.gx = (p.gx ?? (hasTiang(pointInfo(p)) ? 30 : 14)) + dx; p.gy = (p.gy ?? 0) + dy; }
     if (drag.hit.kind === 'koord') { p.kx = (p.kx ?? 0) + dx; p.ky = (p.ky ?? 30) + dy; }
     if (drag.hit.kind === 'note') { p.nx += dx; p.ny += dy; }
     drawPreview();
@@ -567,7 +605,7 @@ async function renderPdfTab() {
   pv.onpointerup = pv.onpointercancel = () => { if (drag) { drag = null; save(); } };
   $('#pdfReset').onclick = () => {
     if (!confirm('Kembalikan semua posisi simbol, label dan catatan ke posisi otomatis?')) return;
-    S.points.forEach(p => ['ox', 'oy', 'lx', 'ly', 'kx', 'ky', 'nx', 'ny'].forEach(k => delete p[k])); save(); drawPreview();
+    S.points.forEach(p => ['ox', 'oy', 'lx', 'ly', 'gx', 'gy', 'kx', 'ky', 'nx', 'ny'].forEach(k => delete p[k])); save(); drawPreview();
   };
   $('#pdfZoom').onclick = () => {
     const big = pv.style.width !== '280%'; pv.style.width = big ? '280%' : '100%';

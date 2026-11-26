@@ -172,13 +172,12 @@ class SurveyMap {
     for (const p of this.points) {
       const q = p.parent && byId[p.parent]; if (!q || p.lat == null || q.lat == null) continue;
       const a = this.toScreen(q.lat, q.lng), b = this.toScreen(p.lat, p.lng);
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-      if (p.type === 'jalan') { ctx.strokeStyle = 'rgba(90,90,90,.55)'; ctx.lineWidth = 8; ctx.setLineDash([]); }
-      else {
-        ctx.strokeStyle = p.jar === 'TM' ? '#d62828' : '#1d8fd6'; ctx.lineWidth = 3;
-        ctx.setLineDash(p.segStatus === 'eks' ? [] : p.segStatus === 'bongkar' ? [2, 5] : [8, 6]);
-      }
-      ctx.stroke(); ctx.setLineDash([]);
+      if (p.type === 'jalan') {
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = 'rgba(90,90,90,.55)'; ctx.lineWidth = 8; ctx.setLineDash([]); ctx.stroke();
+      } else if (isNet(p) && isNet(q)) {
+        const ls = netLines(p); ls.forEach((l, i) => strokeNet(ctx, a, b, l, i, ls.length, 1.4, true));
+      } else continue;
       if (p.type !== 'jalan' && p.type !== 'label') {
         const d = haversine(q, p); const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
         const txt = d.toFixed(0) + ' m';
@@ -194,9 +193,8 @@ class SurveyMap {
       if (p.id === this.selected) {
         ctx.beginPath(); ctx.arc(s.x, s.y, 16, 0, 7); ctx.fillStyle = 'rgba(255,200,0,.45)'; ctx.fill();
       }
-      SurveyMap.symbol(ctx, p, s.x, s.y, 1);
-      let lbl = p.type === 'tiang' ? 'T' + (p.no || '') : p.type === 'gardu' ? (p.kode || 'Gardu') :
-        p.type === 'pelanggan' ? (p.nama || 'Pelanggan') : p.type === 'label' ? (p.teks || 'Label') : '';
+      if (p.type === 'jaringan') drawPointSymbols(ctx, p, s.x, s.y, 1); else SurveyMap.symbol(ctx, p, s.x, s.y, 1);
+      let lbl = this.opts.label ? this.opts.label(p) : '';
       if (lbl) {
         ctx.font = 'bold 12px sans-serif';
         ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.strokeText(lbl, s.x + 10, s.y - 9);

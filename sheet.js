@@ -29,7 +29,73 @@ const MAT_SECTIONS = [
     { t: 'GARDU DISTRIBUSI', rows: [['Trafo 50 KVa', 'Unit'], ['Trafo 100 KVa', 'Unit'], ['Trafo 160 KVa', 'Unit'], ['Trafo 250 KVa', 'Unit']] }] },
 ];
 const asArr = v => Array.isArray(v) ? v : v ? String(v).split(/[\s,+]+/).filter(Boolean) : [];
-const tipeGardu = g => g.tipe || (+g.dayaRencana <= 25 ? 'SINGLE POLE' : 'DOUBLE POLE');
+const keyName = k => k.split('|')[2];
+const keyGroup = k => k.split('|')[1];
+const isNet = p => p.type === 'jaringan' || p.type === 'pelanggan';
+
+// Ringkasan isi satu titik (dari material yang dipilih + kondisi eksisting)
+function pointInfo(p) {
+  const m = p.mat || {}, keys = Object.keys(m), eks = p.eks || {};
+  const has = pre => keys.filter(k => k.startsWith(pre));
+  const parseT = k => { const n = keyName(k); return { jenis: /besi/i.test(n) ? 'besi' : 'beton', tinggi: (n.match(/\d+/) || [''])[0] }; };
+  const tb = [...has('HUTM|TIANG|'), ...has('HUTR|TIANG|')][0];
+  const bt = has('BONGKAR|TIANG|')[0];
+  const trafo = has('GARDU|')[0];
+  const nets = {};
+  for (const net of ['TM', 'TR']) {
+    const sec = net === 'TM' ? 'HUTM' : 'HUTR';
+    const baru = has(sec + '|KABEL|')[0];
+    const bong = has('BONGKAR|KABEL|').find(k => net === 'TM' ? /A3CS/.test(k) : /JTR/.test(k));
+    if (baru) nets[net] = { status: 'rencana', hantar: keyName(baru), lama: bong ? keyName(bong) : (asArr(eks.jar).includes(net) ? (eks.hantar || {})[net] : '') , ganti: !!bong || asArr(eks.jar).includes(net) };
+    else if (bong) nets[net] = { status: 'bongkar', hantar: keyName(bong) };
+    else if (asArr(eks.jar).includes(net)) nets[net] = { status: 'eks', hantar: (eks.hantar || {})[net] || '' };
+  }
+  return {
+    tiangBaru: tb ? { ...parseT(tb), net: tb.startsWith('HUTM') ? 'TM' : 'TR' } : null,
+    tiangEks: eks.tiang || null,
+    tiangBongkar: bt ? parseT(bt) : null,
+    trafoBaru: trafo ? { daya: (keyName(trafo).match(/\d+/) || [''])[0], tipe: keyGroup(trafo) } : null,
+    trafoBongkar: has('BONGKAR|GARDU DISTRIBUSI|').length > 0,
+    garduEks: eks.gardu ? { daya: eks.dayaGardu || '' } : null,
+    konsTM: has('HUTM|KONSTRUKSI|').map(keyName),
+    konsTR: has('HUTR|KONSTRUKSI|').map(keyName).filter(n => n !== 'Grounding').map(n => n.replace(/ TR$/, '')),
+    grounding: !!m['HUTR|KONSTRUKSI|Grounding'],
+    skur: has('HUTM|SKUR|Skur').length + has('HUTR|SKUR|Skur').length > 0,
+    spanGuy: has('HUTM|SKUR|Spunh').length + has('HUTR|SKUR|Spunh').length > 0,
+    nets,
+  };
+}
+const hasTiang = i => !!(i.tiangBaru || i.tiangEks || i.tiangBongkar);
+const hasGardu = i => !!(i.trafoBaru || i.garduEks);
+
+// Simbol gabungan satu titik (tiang + gardu + bongkar) – dipakai peta & PDF
+function drawPointSymbols(ctx, p, x, y, k) {
+  const i = pointInfo(p);
+  const sym = (o, dx, kk) => SurveyMap.symbol(ctx, o, x + dx, y, kk || k);
+  const old = i.tiangBongkar || i.tiangEks ? { type: 'tiang', status: i.tiangBongkar ? 'bongkar' : 'eks', jenis: i.tiangEks || (i.tiangBongkar || {}).jenis } : null;
+  if (i.tiangBaru) { sym({ type: 'tiang', status: 'rencana' }, 0); if (old) sym(old, -17 * k, k * 0.8); }
+  else if (old) sym(old, 0);
+  if (hasGardu(i)) sym({ type: 'gardu', status: i.trafoBaru && !i.garduEks ? 'rencana' : 'eks' }, hasTiang(i) ? 17 * k : 0);
+  if (!hasTiang(i) && !hasGardu(i)) {
+    ctx.save(); ctx.beginPath(); ctx.arc(x, y, 3.5 * k, 0, 7); ctx.fillStyle = '#555'; ctx.fill(); ctx.restore();
+  }
+  return i;
+}
+// Garis ruas dari induk: satu garis per jaringan (TM merah, TR biru)
+function netLines(p) {
+  const i = pointInfo(p); const out = Object.entries(i.nets).map(([net, v]) => ({ net, ...v }));
+  return out.length ? out : [{ net: '-', status: 'none' }];
+}
+function strokeNet(ctx, a, b, l, idx, n, k, map) {
+  const off = n > 1 ? (idx === 0 ? -3 : 3) * k : 0;
+  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, ox = -dy / d * off, oy = dx / d * off;
+  ctx.save();
+  ctx.strokeStyle = l.net === 'TM' ? '#e0141e' : l.net === 'TR' ? '#1d9be0' : '#888';
+  ctx.lineWidth = (l.net === '-' ? 1.2 : map ? 3 : 2.2) * (map ? 1 : 1);
+  const dash = l.status === 'eks' ? [] : l.status === 'bongkar' ? [1.5, 3] : l.status === 'none' ? [3, 3] : [5, 4];
+  ctx.setLineDash(dash.map(v => v * (map ? 1.5 : 1)));
+  ctx.beginPath(); ctx.moveTo(a.x + ox, a.y + oy); ctx.lineTo(b.x + ox, b.y + oy); ctx.stroke(); ctx.restore();
+}
 
 const URAIAN_ROWS = [
   ['#', 'JTM'], ['kodePenyulang', 'Kode Penyulang'], ['hantarJTM', 'Penghantar (mm²)'], ['teganganJTM', 'Tegangan JTM'],
@@ -42,55 +108,36 @@ function segments(sv) {
   const out = [];
   for (const p of sv.points) {
     const q = p.parent && byId[p.parent];
-    if (!q || p.type === 'jalan' || p.type === 'label' || q.type === 'label') continue;
-    if (p.lat == null || q.lat == null) continue;
-    out.push({ from: q, to: p, len: haversine(q, p), jar: p.jar || 'TR', status: p.segStatus || 'rencana', hantar: p.hantar, lama: p.hantarLama });
+    if (!q || !isNet(p) || p.lat == null || q.lat == null) continue;
+    const len = haversine(q, p);
+    for (const l of netLines(p)) if (l.net !== '-') out.push({ from: q, to: p, len, jar: l.net, status: l.status, hantar: l.hantar, lama: l.lama, ganti: l.ganti });
   }
   return out;
+}
+function segLen(sv, p) {
+  const q = p.parent && sv.points.find(x => x.id === p.parent);
+  return q && q.lat != null && p.lat != null ? haversine(q, p) : 0;
 }
 
 function computeMaterial(sv) {
   const st = sv.settings || {};
   const tol = +(st.toleransi ?? 3), bulat = +(st.bulat ?? 1) || 1;
-  const auto = {}; const warn = [];
-  const add = (sec, grp, name, q) => { const k = `${sec}|${grp}|${name}`; auto[k] = (auto[k] || 0) + q; };
-  const tiangName = p => `${p.jenis === 'besi' ? 'Besi' : 'Beton'} ${p.tinggi || 9}`;
+  const auto = {}, raw = {}, warn = [];
+  const add = (k, q) => { auto[k] = (auto[k] || 0) + q; };
   for (const p of sv.points) {
-    if (p.type === 'tiang') {
-      const sec = p.jar === 'TM' ? 'HUTM' : 'HUTR';
-      const kons = [...asArr(p.konsTM).map(k => ['HUTM', k]), ...asArr(p.konsTR).map(k => ['HUTR', k + ' TR'])];
-      if (p.status === 'rencana') {
-        if (p.jenis === 'kayu') warn.push(`Tiang ${p.no}: tiang kayu tidak ada di daftar material`);
-        else add(sec, 'TIANG', tiangName(p), 1);
-        kons.forEach(([s, k]) => add(s, 'KONSTRUKSI', k, 1));
-      }
-      if (p.status === 'bongkar') {
-        if (p.jenis !== 'kayu') add('BONGKAR', 'TIANG', tiangName(p), 1);
-        kons.forEach(([, k]) => add('BONGKAR', 'KONSTRUKSI', k, 1));
-      }
-      if (p.status !== 'bongkar') {
-        if (p.skur) add(sec, 'SKUR', 'Skur ' + p.jar, 1);
-        if (p.spanGuy) add(sec, 'SKUR', 'Spunh Guy ' + p.jar, 1);
-        if (p.grounding) add('HUTR', 'KONSTRUKSI', 'Grounding', 1);
-      }
-    }
-    if (p.type === 'gardu') {
-      const baru = p.dayaRencana && (p.status === 'rencana' || +p.dayaRencana !== +p.dayaEks);
-      if (baru && p.status !== 'bongkar') add('GARDU', tipeGardu(p), `Trafo ${p.dayaRencana} KVa`, 1);
-      if (p.dayaEks && (p.status === 'bongkar' || (baru && p.status === 'eks'))) add('BONGKAR', 'GARDU DISTRIBUSI', `Trafo ${p.dayaEks} KVa`, 1);
+    for (const [k, v] of Object.entries(p.mat || {})) {
+      if (keyGroup(k) === 'KABEL' && (v === 'auto' || v === '' || v == null)) {
+        const L = segLen(sv, p);
+        if (!L) warn.push(`${keyName(k)} di titik ${p.no || ''} belum punya induk – panjang kabel 0`);
+        raw[k] = (raw[k] || 0) + L;
+      } else add(k, +v || (keyGroup(k) === 'KABEL' ? 0 : 1));
     }
   }
-  const len = {}, lenB = {};
-  const counted = h => h && !/tidak dihitung/.test(h);
-  for (const s of segments(sv)) {
-    if ((s.status === 'rencana' || s.status === 'ganti') && counted(s.hantar)) len[s.hantar] = (len[s.hantar] || 0) + s.len;
-    const old = s.status === 'ganti' ? s.lama : s.status === 'bongkar' ? s.hantar : null;
-    if (counted(old)) lenB[old] = (lenB[old] || 0) + s.len;
+  const len = {};
+  for (const [k, m] of Object.entries(raw)) {
+    len[keyName(k) + (k.startsWith('BONGKAR') ? ' (bongkar)' : '')] = m;
+    add(k, k.startsWith('BONGKAR') ? Math.round(m) : Math.ceil(m * (1 + tol / 100) / bulat) * bulat);
   }
-  const kab = m => Math.ceil(m * (1 + tol / 100) / bulat) * bulat;
-  for (const [h, m] of Object.entries(len)) add(h.startsWith('A3CS') ? 'HUTM' : 'HUTR', 'KABEL', h, kab(m));
-  for (const [h, m] of Object.entries(lenB)) add('BONGKAR', 'KABEL', h, Math.round(m));
-  // baris baku + baris tambahan (kombinasi di luar format / tambahan manual)
   const sections = MAT_SECTIONS.map(s => ({ key: s.key, title: s.title, color: s.color,
     groups: s.groups.map(g => ({ t: g.t, rows: g.rows.map(r => ({ name: r[0], unit: r[1], key: `${s.key}|${g.t}|${r[0]}` })) })) }));
   const ensure = (k, unit) => {
@@ -107,28 +154,65 @@ function computeMaterial(sv) {
   }
   return { sections, warn, len };
 }
+// Katalog untuk editor titik (semua baris baku + tambahan survei)
+function catalog(sv) {
+  return MAT_SECTIONS.map(s => ({ key: s.key, title: s.title, color: s.color,
+    groups: s.groups.map(g => ({ t: g.t, rows: [...g.rows.map(r => ({ name: r[0], unit: r[1], key: `${s.key}|${g.t}|${r[0]}` })),
+      ...Object.entries(sv.materialExtra || {}).filter(([k]) => k.startsWith(`${s.key}|${g.t}|`)).map(([k, u]) => ({ name: keyName(k), unit: u, key: k, extra: true }))] })) }));
+}
 
 function uraianAuto(sv) {
-  const g = sv.points.find(p => p.type === 'gardu') || {};
+  const g = sv.points.map(p => ({ p, i: pointInfo(p) })).find(x => hasGardu(x.i));
   const seg = segments(sv);
   const sum = f => seg.filter(f).reduce((a, s) => a + s.len, 0) / 1000;
   const fmt = v => v ? v.toFixed(3).replace('.', ',') : '';
-  const lamaTR = seg.find(s => s.jar === 'TR' && s.status === 'ganti' && s.lama);
-  const baruTR = seg.find(s => s.jar === 'TR' && (s.status === 'rencana' || s.status === 'ganti') && s.hantar && !/tidak/.test(s.hantar));
-  const eksTM = seg.find(s => s.jar === 'TM' && s.hantar);
+  const lamaTR = seg.find(s => s.jar === 'TR' && (s.lama || s.status === 'bongkar' || s.status === 'eks') && (s.lama || s.hantar));
+  const baruTR = seg.find(s => s.jar === 'TR' && s.status === 'rencana' && s.hantar);
+  const tm = seg.find(s => s.jar === 'TM' && (s.lama || (s.status !== 'rencana' && s.hantar)));
+  const gi = g ? g.i : {};
   return {
     kodePenyulang: { seb: sv.penyulang || '' },
-    hantarJTM: { seb: eksTM ? eksTM.hantar : '' },
-    daya: { seb: g.dayaEks || '', baru: g.dayaRencana && +g.dayaRencana !== +g.dayaEks ? g.dayaRencana : '' },
-    phasa: { seb: g.phasa ? g.phasa : '' },
-    hantarJTR: { seb: lamaTR ? lamaTR.lama : '', baru: baruTR ? baruTR.hantar : '' },
-    panjangJTR: { seb: fmt(sum(s => s.jar === 'TR' && s.status !== 'rencana')), baru: fmt(sum(s => s.jar === 'TR' && (s.status === 'rencana' || s.status === 'ganti'))) },
+    hantarJTM: { seb: tm ? (tm.lama || tm.hantar) : '' },
+    daya: { seb: gi.garduEks ? gi.garduEks.daya : '', baru: gi.trafoBaru ? gi.trafoBaru.daya : '' },
+    phasa: { seb: gi.garduEks ? '3' : '' },
+    hantarJTR: { seb: lamaTR ? (lamaTR.lama || lamaTR.hantar) : '', baru: baruTR ? baruTR.hantar : '' },
+    panjangJTR: { seb: fmt(sum(s => s.jar === 'TR' && (s.status !== 'rencana' || s.ganti))), baru: fmt(sum(s => s.jar === 'TR' && s.status === 'rencana')) },
   };
 }
 function uraianValue(sv, key, col) {
   const m = (sv.uraian || {})[key] || {};
   if (m[col] !== undefined && m[col] !== '') return m[col];
   return ((uraianAuto(sv)[key] || {})[col]) || '';
+}
+
+// Konversi data versi lama (tipe tiang/gardu) ke model material per titik
+function migratePoint(p) {
+  if (p.type !== 'tiang' && p.type !== 'gardu' && !(p.type === 'pelanggan' && !p.mat)) return;
+  const mat = {}, eks = { jar: [], hantar: {} };
+  const sec = p.jar === 'TM' ? 'HUTM' : 'HUTR';
+  const tn = `${p.jenis === 'besi' ? 'Besi' : 'Beton'} ${p.tinggi || 9}`;
+  if (p.type === 'tiang') {
+    if (p.status === 'rencana') { mat[`${sec}|TIANG|${tn}`] = 1; asArr(p.konsTM).forEach(k => mat[`HUTM|KONSTRUKSI|${k}`] = 1); asArr(p.konsTR).forEach(k => mat[`HUTR|KONSTRUKSI|${k.replace(/ TR$/, '')} TR`] = 1); }
+    else if (p.status === 'bongkar') { mat[`BONGKAR|TIANG|${tn}`] = 1; eks.tiang = p.jenis; }
+    else eks.tiang = p.jenis || 'beton';
+    if (p.skur) mat[`${sec}|SKUR|Skur ${p.jar || 'TR'}`] = 1;
+    if (p.spanGuy) mat[`${sec}|SKUR|Spunh Guy ${p.jar || 'TR'}`] = 1;
+    if (p.grounding) mat['HUTR|KONSTRUKSI|Grounding'] = 1;
+  }
+  if (p.type === 'gardu') {
+    if (p.status !== 'rencana') { eks.gardu = true; eks.dayaGardu = p.dayaEks || ''; }
+    if (p.dayaEks && ((p.dayaRencana && +p.dayaRencana !== +p.dayaEks) || p.status === 'bongkar')) mat[`BONGKAR|GARDU DISTRIBUSI|Trafo ${p.dayaEks} KVa`] = 1;
+    if (p.dayaRencana && p.status !== 'bongkar') mat[`GARDU|${p.tipe || (+p.dayaRencana <= 25 ? 'SINGLE POLE' : 'DOUBLE POLE')}|Trafo ${p.dayaRencana} KVa`] = 1;
+  }
+  const net = p.jar === 'TM' ? 'TM' : 'TR';
+  if (p.parent && p.hantar && !/tidak/.test(p.hantar)) {
+    if (p.segStatus === 'rencana' || p.segStatus === 'ganti') mat[`${net === 'TM' ? 'HUTM' : 'HUTR'}|KABEL|${p.hantar}`] = 'auto';
+    if (p.segStatus === 'ganti' && p.hantarLama) mat[`BONGKAR|KABEL|${p.hantarLama}`] = 'auto';
+    if (p.segStatus === 'bongkar') mat[`BONGKAR|KABEL|${p.hantar}`] = 'auto';
+    if (p.segStatus === 'eks') { eks.jar.push(net); eks.hantar[net] = p.hantar; }
+  } else if (p.parent && p.segStatus === 'eks') eks.jar.push(net);
+  if (p.type !== 'pelanggan') p.type = 'jaringan';
+  p.mat = mat; p.eks = eks;
 }
 
 // ---------- utilitas gambar ----------
@@ -368,14 +452,12 @@ function drawNetwork(ctx, sv, hits, opts) {
     ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = 11; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   }
   ctx.restore();
-  // jaringan (TM merah, TR biru; eksisting garis penuh, rencana/ganti putus-putus)
+  // jaringan: satu garis per jaringan pada ruas (TM merah, TR biru; eksisting penuh, rencana putus-putus, bongkar titik-titik)
   for (const p of pts) {
     const q = p.parent && byId[p.parent];
-    if (!q || p.type === 'jalan' || p.type === 'label' || q.type === 'label' || q.type === 'jalan') continue;
-    const a = pos[q.id], b = pos[p.id];
-    ctx.save(); ctx.strokeStyle = p.jar === 'TM' ? '#e0141e' : '#1d9be0'; ctx.lineWidth = 2.2;
-    ctx.setLineDash(p.segStatus === 'eks' ? [] : p.segStatus === 'bongkar' ? [1.5, 3] : [5, 4]);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
+    if (!q || !isNet(p) || !isNet(q)) continue;
+    const ls = netLines(p);
+    ls.forEach((l, i) => strokeNet(ctx, pos[q.id], pos[p.id], l, i, ls.length, 1, false));
   }
   const reg = (kind, p, x, y, w, h) => hits.push({ kind, id: p.id, x, y, w, h });
   for (const p of pts) {
@@ -389,31 +471,35 @@ function drawNetwork(ctx, sv, hits, opts) {
       ctx.restore(); reg('sym', p, P.x - w / 2 - 4, P.y - lines.length * 6 - 4, w + 8, lines.length * 12 + 8);
       continue;
     }
+    let info;
     if (p.type === 'pelanggan') {
       ctx.save(); ctx.fillStyle = '#fff'; ctx.fillRect(P.x - 38, P.y - 18, 76, 36);
       ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(P.x - 38, P.y - 18, 76, 36);
       cellText(ctx, 'PELANGGAN', P.x - 38, P.y - 16, 76, 18, { align: 'center', size: 9 });
       if (p.nama) cellText(ctx, p.nama, P.x - 38, P.y + 1, 76, 14, { align: 'center', size: 6.5 });
       ctx.restore(); reg('sym', p, P.x - 38, P.y - 18, 76, 36);
+      info = pointInfo(p);
     } else {
-      SurveyMap.symbol(ctx, p, P.x, P.y, 1.05); reg('sym', p, P.x - 10, P.y - 10, 20, 20);
+      info = drawPointSymbols(ctx, p, P.x, P.y, 1.05); reg('sym', p, P.x - 12, P.y - 12, 24, 24);
     }
-    if (p.type === 'tiang') {
-      if (p.skur) skurIcon(ctx, P.x - 6, P.y + 12, 18);
-      if (p.grounding) groundIcon(ctx, P.x + 2, P.y + 12, 18);
-      if (p.status === 'rencana' || p.showBubble) {
-        const bx = P.x + (p.lx ?? 0), by = P.y + (p.ly ?? -34);
-        poleBubble(ctx, bx, by, 17, String(p.no || ''), String(p.tinggi || ''), asArr(p.konsTM).join(' '), asArr(p.konsTR).join(' '));
-        reg('lbl', p, bx - 18, by - 17, 36, 34);
-      }
+    if (info.skur) skurIcon(ctx, P.x - 6, P.y + 12, 18);
+    if (info.spanGuy) skurIcon(ctx, P.x - 6, P.y + 17, 24);
+    if (info.grounding) groundIcon(ctx, P.x + 2, P.y + 12, 18);
+    if (p.type === 'jaringan' && (info.tiangBaru || (hasTiang(info) && p.showBubble))) {
+      const t = info.tiangBaru || info.tiangBongkar || {};
+      const bx = P.x + (p.lx ?? 0), by = P.y + (p.ly ?? -34);
+      poleBubble(ctx, bx, by, 17, String(p.no || ''), String(t.tinggi || ''), info.konsTM.join(' '), info.konsTR.join(' '));
+      reg('lbl', p, bx - 18, by - 17, 36, 34);
     }
-    if (p.type === 'gardu') {
+    if (p.type === 'jaringan' && hasGardu(info)) {
       ctx.save(); ctx.font = `bold 9.5px ${FONT}`; ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
-      const gx = P.x + (p.lx ?? 14), gy = P.y + (p.ly ?? 0);
-      const l1 = (p.kode || '').toUpperCase(), l2 = (p.dayaEks || p.dayaRencana) ? `${p.dayaEks || p.dayaRencana} KVA` : '';
+      const gx = P.x + (p.gx ?? (hasTiang(info) ? 30 : 14)), gy = P.y + (p.gy ?? 0);
+      const de = info.garduEks && info.garduEks.daya, db = info.trafoBaru && info.trafoBaru.daya;
+      const l1 = (p.kode || '').toUpperCase();
+      const l2 = de && db && de !== db ? `${de} → ${db} KVA` : (db || de) ? `${db || de} KVA` : '';
       ctx.fillText(l1, gx, gy - 6); ctx.fillText(l2, gx, gy + 6);
-      const w = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width);
-      ctx.restore(); reg('lbl', p, gx, gy - 12, w, 24);
+      const w = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width, 10);
+      ctx.restore(); reg('glbl', p, gx, gy - 12, w, 24);
     }
     if (p.showKoord) {
       ctx.save(); ctx.font = `bold 8.5px ${FONT}`; ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
