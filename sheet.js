@@ -2,66 +2,149 @@
 const PAGE = { w: 1190.55, h: 841.89 }; // A3 landscape (pt)
 const FONT = 'Arial, Helvetica, "Liberation Sans", sans-serif';
 
-// Daftar material sesuai format UP3 Nias: bagian → kelompok → baris
-const KONS_TM = ['SC1', 'SC2', 'SC4', 'SC5', 'SC5 DP', 'SC7', 'SC8'];
-const KONS_TR = ['X1', 'X3', 'X4'];
-const TIANG_ROWS = [['Besi 12', 'Btg'], ['Besi 9', 'Btg'], ['Beton 12', 'Btg'], ['Beton 9', 'Btg']];
-const HANTAR_TM = ['A3CS 70 mm', 'A3CS 150 mm'];
-const HANTAR_TR = ['JTR 70 mm', 'JTR 35 mm', 'JTR 25 mm', 'SR / kabel lain (tidak dihitung)'];
+// Daftar material = nama baku di "FORMAT RAB UNTUK KR" (sheet ISIAN / RAB (tunai)).
+// cell = sel input volume di file RAB (untuk sinkron ke dashboard RAB).
+// kind dipakai untuk menggambar: tiang, kabel, kons, skur, span, ground, kumis, trafo, opstig, app, btiang, bkabel, bkons, btrafo
+const R = (name, unit, cell, kind, x = {}) => ({ name, unit, cell, kind, ...x });
 const MAT_SECTIONS = [
   { key: 'HUTM', title: 'MATERIAL HUTM', color: '#c4d79b', groups: [
-    { t: 'TIANG', rows: TIANG_ROWS },
-    { t: 'KABEL', rows: HANTAR_TM.map(h => [h, 'Mtr']) },
-    { t: 'KONSTRUKSI', rows: KONS_TM.map(k => [k, 'Set']) },
-    { t: 'SKUR', rows: [['Skur TM', 'Set'], ['Spunh Guy TM', 'Set']] }] },
+    { t: 'TIANG', rows: [
+      R('Tiang Besi 12 mtr 200 daN', 'Btg', 'ISIAN!E10', 'tiang', { net: 'TM', tinggi: 12 }),
+      R('Tiang Besi 9 mtr 200 daN', 'Btg', 'ISIAN!E11', 'tiang', { net: 'TM', tinggi: 9 })] },
+    { t: 'KABEL', rows: [
+      R('AAAC-S 70 mm²', 'Mtr', 'ISIAN!E15', 'kabel', { net: 'TM', short: 'AAAC-S 70', note: 'panjang jalur; RAB otomatis ×3 phasa + andongan' })] },
+    { t: 'KONSTRUKSI', rows: ['SC1', 'SC2', 'SC4', 'SC5', 'SC5DP', 'SC7', 'SC8'].map((k, i) =>
+      R('KONSTRUKSI ' + k, 'Unit', 'ISIAN!F' + [18, 29, 40, 51, 64, 79, 93][i], 'kons', { net: 'TM', short: k })) },
+    { t: 'SKUR', rows: [
+      R('SKUR TM', 'Unit', 'ISIAN!F107', 'skur', { net: 'TM' }),
+      R('SPUNH GUY TM', 'Unit', 'ISIAN!F117', 'span', { net: 'TM' })] }] },
   { key: 'HUTR', title: 'MATERIAL HUTR', color: '#fabf8f', groups: [
-    { t: 'TIANG', rows: TIANG_ROWS },
-    { t: 'KABEL', rows: HANTAR_TR.slice(0, 3).map(h => [h, 'Mtr']) },
-    { t: 'KONSTRUKSI', rows: [...KONS_TR.map(k => [k + ' TR', 'Set']), ['Grounding', 'Set']] },
-    { t: 'SKUR', rows: [['Skur TR', 'Set'], ['Spunh Guy TR', 'Set']] }] },
+    { t: 'TIANG', rows: [
+      R('POLE;STEEL;220V;CIRCL;9m;200daN', 'Btg', 'ISIAN!F235', 'tiang', { net: 'TR', tinggi: 9 })] },
+    { t: 'KABEL', rows: [
+      R('CABLE PWR;NFA2X-T;3X70+1X70;0.6/1kV;OH', 'Mtr', 'ISIAN!F236', 'kabel', { net: 'TR', short: 'NFA2X-T 3x70+1x70', note: 'panjang jalur; RAB otomatis + andongan' }),
+      R('CABLE PWR;NFA2X-T;3X35+1X35;0.6/1kV;OH', 'Mtr', 'ISIAN!F237', 'kabel', { net: 'TR', short: 'NFA2X-T 3x35+1x35', note: 'panjang jalur; RAB otomatis + andongan' })] },
+    { t: 'KONSTRUKSI', rows: [
+      R('Konstruksi X1 TR', 'Unit', 'ISIAN!F240', 'kons', { net: 'TR', short: 'X1' }),
+      R('Konstruksi X3 TR (25-50 mm²)', 'Unit', 'ISIAN!F252', 'kons', { net: 'TR', short: 'X3' }),
+      R('Konstruksi X3 TR (50-70 mm²)', 'Unit', 'ISIAN!F253', 'kons', { net: 'TR', short: 'X3' }),
+      R('Konstruksi X4 TR (25-50 mm²) Awal', 'Unit', 'ISIAN!F258', 'kons', { net: 'TR', short: 'X4' }),
+      R('Konstruksi X4 TR (50-70 mm²) Awal', 'Unit', 'ISIAN!F259', 'kons', { net: 'TR', short: 'X4' }),
+      R('Konstruksi X4 TR (25-50 mm²) Akhir', 'Unit', 'ISIAN!F260', 'kons', { net: 'TR', short: 'X4' }),
+      R('Konstruksi X4 TR (50-70 mm²) Akhir', 'Unit', 'ISIAN!F261', 'kons', { net: 'TR', short: 'X4' }),
+      R('Konstruksi M1 (Grounding)', 'Unit', 'ISIAN!F268', 'ground', { net: 'TR' })] },
+    { t: 'KUMIS KUCING', rows: [
+      R('Kumis Kucing NFA2X-T 3X70+1X70', 'Tiang', 'ISIAN!F245', 'kumis', { net: 'TR' }),
+      R('Kumis Kucing NFA2X-T 3X35+1X35', 'Tiang', 'ISIAN!F246', 'kumis', { net: 'TR' }),
+      R('Line Tap Connector CCO 35-50/10-16 mm² (per pelanggan)', 'Plgn', 'ISIAN!F247', 'kumis', { net: 'TR' })] },
+    { t: 'SKUR', rows: [
+      R('SKUR TR', 'Unit', 'ISIAN!F277', 'skur', { net: 'TR' }),
+      R('SPUNH GUY TR', 'Unit', 'ISIAN!F288', 'span', { net: 'TR' })] }] },
   { key: 'GARDU', title: 'GARDU DISTRIBUSI', color: '#92cddc', groups: [
-    { t: 'SINGLE POLE', rows: [['Trafo 25 KVa', 'Unit'], ['Trafo 50 KVa', 'Unit']] },
-    { t: 'DOUBLE POLE', rows: [['Trafo 50 KVa', 'Unit'], ['Trafo 100 KVa', 'Unit'], ['Trafo 160 KVa', 'Unit'], ['Trafo 250 KVa', 'Unit']] }] },
+    { t: 'SINGLE POLE', rows: [
+      R('TRF DIS;D3;20kV/400V;3P;50kVA;YZN5;OD', 'Unit', 'ISIAN!F132', 'trafo', { daya: 50 }),
+      R('CABLE PWR;NYY;1X70mm2;0.6/1kV;Opstig 1 Jurusan', 'Unit', 'ISIAN!F137', 'opstig'),
+      R('CABLE PWR;NYY;1X70mm2;0.6/1kV;Opstig 2 Jurusan', 'Unit', 'ISIAN!F138', 'opstig')] },
+    { t: 'DOUBLE POLE', rows: [
+      R('TRF DIS;D3;20kV/400V;3P;50kVA;YZN5;OD', 'Unit', 'ISIAN!F166', 'trafo', { daya: 50 }),
+      R('TRF DIS;D3;20kV/400V;3P;100kVA;YZN5;OD', 'Unit', 'ISIAN!F167', 'trafo', { daya: 100 }),
+      R('TRF DIS;D3;20kV/400V;3P;160kVA;YZN5;OD', 'Unit', 'ISIAN!F168', 'trafo', { daya: 160 }),
+      R('TRF DIS;D3;20kV/400V;3P;250kVA;DYN5;OD', 'Unit', 'ISIAN!F169', 'trafo', { daya: 250 }),
+      ...[['1X70', 178, 179], ['1X95', 180, 181], ['1X150', 182, 183]].flatMap(([c, r1, r2]) => [
+        R(`CABLE PWR;NYY;${c}mm2;0.6/1kV;Opstig 1 Jurusan`, 'Unit', 'ISIAN!F' + r1, 'opstig'),
+        R(`CABLE PWR;NYY;${c}mm2;0.6/1kV;Opstig 2 Jurusan`, 'Unit', 'ISIAN!F' + r2, 'opstig')])] }] },
+  { key: 'APP', title: 'MATERIAL APP', color: '#e4dfec', groups: [
+    { t: 'APP', rows: [R('kWh Meter Statik Phase Tiga Pengukuran Tidak Langsung Kelas 1', 'Unit', 'ISIAN!F223', 'app')] }] },
   { key: 'BONGKAR', title: 'PEMBONGKARAN', color: '#d9d9d9', groups: [
-    { t: 'TIANG', rows: TIANG_ROWS },
-    { t: 'KABEL', rows: [...HANTAR_TM, ...HANTAR_TR.slice(0, 3)].map(h => [h, 'Mtr']) },
-    { t: 'KONSTRUKSI', rows: [...KONS_TM.map(k => [k, 'Set']), ...KONS_TR.map(k => [k + ' TR', 'Set'])] },
-    { t: 'GARDU DISTRIBUSI', rows: [['Trafo 50 KVa', 'Unit'], ['Trafo 100 KVa', 'Unit'], ['Trafo 160 KVa', 'Unit'], ['Trafo 250 KVa', 'Unit']] }] },
+    { t: 'TIANG', rows: [
+      R('Pembongkaran Tiang Besi 9 M - 200 dAN (HUTM)', 'Btg', "'RAB (tunai)'!E168", 'btiang', { net: 'TM', tinggi: 9 }),
+      R('Pembongkaran Tiang Besi 9 M - 200 dAN (HUTR)', 'Btg', "'RAB (tunai)'!E223", 'btiang', { net: 'TR', tinggi: 9 }),
+      R('Pembongkaran Tiang Besi 7 M - 100 dAN', 'Btg', "'RAB (tunai)'!E224", 'btiang', { net: 'TR', tinggi: 7 })] },
+    { t: 'KABEL', rows: [
+      R('Jasa Pembongkaran Kawat AAAC 70 mm', 'Mtr', "'RAB (tunai)'!E169", 'bkabel', { net: 'TM', short: 'AAAC 70' }),
+      R('Jasa Menggulung Kembali Kawat AAAC 70 mm Ke Haspel', 'Mtr', "'RAB (tunai)'!E170", 'bkabel', { net: 'TM', short: 'AAAC 70' }),
+      R('Jasa Pembongkaran Kabel LVTC 2 x 25 + 25 mm', 'Mtr', "'RAB (tunai)'!E217", 'bkabel', { net: 'TR', short: 'LVTC 2x25+25' })] },
+    { t: 'KONSTRUKSI', rows: [
+      ...[['C 4 - D P', 166], ['C 5 - D G', 167], ['B 1', 171], ['B 2', 172], ['B 4', 173], ['B 7', 174], ['B 8', 175]].map(([k, r]) =>
+        R('Jasa Pembongkaran Konstruksi ' + k, 'Unit', "'RAB (tunai)'!E" + r, 'bkons', { net: 'TM' })),
+      ...[['X 1', 218], ['X 2', 219], ['X 3', 220], ['X 4 (A)', 221]].map(([k, r]) =>
+        R('Jasa Pembongkaran Konstruksi ' + k, 'Unit', "'RAB (tunai)'!E" + r, 'bkons', { net: 'TR' }))] },
+    { t: 'GARDU DISTRIBUSI', rows: [
+      R('Jasa Pembongkaran Trafo Distribusi 3 Phase 25 KVA', 'Unit', "'RAB (tunai)'!E196", 'btrafo'),
+      R('Jasa Pembongkaran Trafo Distribusi 3 Phase 50 KVA', 'Unit', 'ISIAN!L220 (belum ada baris di RAB tunai)', 'btrafo')] }] },
 ];
+const CAT = {};
+for (const s of MAT_SECTIONS) for (const g of s.groups) for (const r of g.rows) CAT[`${s.key}|${g.t}|${r.name}`] = { ...r, sec: s.key, grp: g.t };
+
+// Konversi nama material versi sebelumnya ke nama RAB
+const OLD_KEYS = {
+  'HUTM|TIANG|Besi 12': 'HUTM|TIANG|Tiang Besi 12 mtr 200 daN', 'HUTM|TIANG|Beton 12': 'HUTM|TIANG|Tiang Besi 12 mtr 200 daN',
+  'HUTM|TIANG|Besi 9': 'HUTM|TIANG|Tiang Besi 9 mtr 200 daN', 'HUTM|TIANG|Beton 9': 'HUTM|TIANG|Tiang Besi 9 mtr 200 daN',
+  'HUTM|KABEL|A3CS 70 mm': 'HUTM|KABEL|AAAC-S 70 mm²', 'HUTM|KABEL|A3CS 150 mm': 'HUTM|KABEL|AAAC-S 70 mm²',
+  'HUTR|KABEL|JTR 70 mm': 'HUTR|KABEL|CABLE PWR;NFA2X-T;3X70+1X70;0.6/1kV;OH',
+  'HUTR|KABEL|JTR 35 mm': 'HUTR|KABEL|CABLE PWR;NFA2X-T;3X35+1X35;0.6/1kV;OH', 'HUTR|KABEL|JTR 25 mm': 'HUTR|KABEL|CABLE PWR;NFA2X-T;3X35+1X35;0.6/1kV;OH',
+  'HUTR|KONSTRUKSI|X1 TR': 'HUTR|KONSTRUKSI|Konstruksi X1 TR', 'HUTR|KONSTRUKSI|X3 TR': 'HUTR|KONSTRUKSI|Konstruksi X3 TR (50-70 mm²)',
+  'HUTR|KONSTRUKSI|X4 TR': 'HUTR|KONSTRUKSI|Konstruksi X4 TR (50-70 mm²) Akhir', 'HUTR|KONSTRUKSI|Grounding': 'HUTR|KONSTRUKSI|Konstruksi M1 (Grounding)',
+  'HUTM|SKUR|Skur TM': 'HUTM|SKUR|SKUR TM', 'HUTM|SKUR|Spunh Guy TM': 'HUTM|SKUR|SPUNH GUY TM',
+  'HUTR|SKUR|Skur TR': 'HUTR|SKUR|SKUR TR', 'HUTR|SKUR|Spunh Guy TR': 'HUTR|SKUR|SPUNH GUY TR',
+  'GARDU|SINGLE POLE|Trafo 50 KVa': 'GARDU|SINGLE POLE|TRF DIS;D3;20kV/400V;3P;50kVA;YZN5;OD',
+  'GARDU|DOUBLE POLE|Trafo 50 KVa': 'GARDU|DOUBLE POLE|TRF DIS;D3;20kV/400V;3P;50kVA;YZN5;OD',
+  'GARDU|DOUBLE POLE|Trafo 100 KVa': 'GARDU|DOUBLE POLE|TRF DIS;D3;20kV/400V;3P;100kVA;YZN5;OD',
+  'GARDU|DOUBLE POLE|Trafo 160 KVa': 'GARDU|DOUBLE POLE|TRF DIS;D3;20kV/400V;3P;160kVA;YZN5;OD',
+  'GARDU|DOUBLE POLE|Trafo 250 KVa': 'GARDU|DOUBLE POLE|TRF DIS;D3;20kV/400V;3P;250kVA;DYN5;OD',
+  'BONGKAR|KABEL|A3CS 70 mm': 'BONGKAR|KABEL|Jasa Pembongkaran Kawat AAAC 70 mm', 'BONGKAR|KABEL|A3CS 150 mm': 'BONGKAR|KABEL|Jasa Pembongkaran Kawat AAAC 70 mm',
+  'BONGKAR|KABEL|JTR 70 mm': 'BONGKAR|KABEL|Jasa Pembongkaran Kabel LVTC 2 x 25 + 25 mm', 'BONGKAR|KABEL|JTR 35 mm': 'BONGKAR|KABEL|Jasa Pembongkaran Kabel LVTC 2 x 25 + 25 mm',
+  'BONGKAR|KABEL|JTR 25 mm': 'BONGKAR|KABEL|Jasa Pembongkaran Kabel LVTC 2 x 25 + 25 mm',
+  'BONGKAR|KONSTRUKSI|X1 TR': 'BONGKAR|KONSTRUKSI|Jasa Pembongkaran Konstruksi X 1', 'BONGKAR|KONSTRUKSI|X3 TR': 'BONGKAR|KONSTRUKSI|Jasa Pembongkaran Konstruksi X 3',
+  'BONGKAR|KONSTRUKSI|X4 TR': 'BONGKAR|KONSTRUKSI|Jasa Pembongkaran Konstruksi X 4 (A)',
+  'BONGKAR|GARDU DISTRIBUSI|Trafo 50 KVa': 'BONGKAR|GARDU DISTRIBUSI|Jasa Pembongkaran Trafo Distribusi 3 Phase 50 KVA',
+};
+function migrateMatKeys(p, extra) {
+  if (!p.mat) return;
+  const out = {};
+  for (const [k, v] of Object.entries(p.mat)) {
+    let nk = CAT[k] || (extra && k in extra) ? k : OLD_KEYS[k];
+    if (!nk && /^BONGKAR\|TIANG\|/.test(k)) nk = 'BONGKAR|TIANG|Pembongkaran Tiang Besi 9 M - 200 dAN (HUTR)';
+    if (!nk && /^HUTR\|TIANG\|/.test(k)) nk = 'HUTR|TIANG|POLE;STEEL;220V;CIRCL;9m;200daN';
+    if (nk) out[nk] = v;
+  }
+  p.mat = out;
+}
+
 const asArr = v => Array.isArray(v) ? v : v ? String(v).split(/[\s,+]+/).filter(Boolean) : [];
 const keyName = k => k.split('|')[2];
 const keyGroup = k => k.split('|')[1];
+const isKabel = k => keyGroup(k) === 'KABEL';
 const isNet = p => p.type === 'jaringan' || p.type === 'pelanggan';
 
 // Ringkasan isi satu titik (dari material yang dipilih + kondisi eksisting)
 function pointInfo(p) {
-  const m = p.mat || {}, keys = Object.keys(m), eks = p.eks || {};
-  const has = pre => keys.filter(k => k.startsWith(pre));
-  const parseT = k => { const n = keyName(k); return { jenis: /besi/i.test(n) ? 'besi' : 'beton', tinggi: (n.match(/\d+/) || [''])[0] }; };
-  const tb = [...has('HUTM|TIANG|'), ...has('HUTR|TIANG|')][0];
-  const bt = has('BONGKAR|TIANG|')[0];
-  const trafo = has('GARDU|')[0];
+  const m = p.mat || {}, eks = p.eks || {};
+  const sel = Object.keys(m).map(k => CAT[k]).filter(Boolean);
+  const kind = k => sel.filter(r => r.kind === k);
+  const tb = kind('tiang')[0], bt = kind('btiang')[0], trafo = kind('trafo')[0];
   const nets = {};
   for (const net of ['TM', 'TR']) {
-    const sec = net === 'TM' ? 'HUTM' : 'HUTR';
-    const baru = has(sec + '|KABEL|')[0];
-    const bong = has('BONGKAR|KABEL|').find(k => net === 'TM' ? /A3CS/.test(k) : /JTR/.test(k));
-    if (baru) nets[net] = { status: 'rencana', hantar: keyName(baru), lama: bong ? keyName(bong) : (asArr(eks.jar).includes(net) ? (eks.hantar || {})[net] : '') , ganti: !!bong || asArr(eks.jar).includes(net) };
-    else if (bong) nets[net] = { status: 'bongkar', hantar: keyName(bong) };
-    else if (asArr(eks.jar).includes(net)) nets[net] = { status: 'eks', hantar: (eks.hantar || {})[net] || '' };
+    const baru = kind('kabel').find(r => r.net === net);
+    const bong = kind('bkabel').find(r => r.net === net);
+    const eksOn = asArr(eks.jar).includes(net);
+    if (baru) nets[net] = { status: 'rencana', hantar: baru.short, lama: bong ? bong.short : eksOn ? (eks.hantar || {})[net] || '' : '', ganti: !!bong || eksOn };
+    else if (bong) nets[net] = { status: 'bongkar', hantar: bong.short };
+    else if (eksOn) nets[net] = { status: 'eks', hantar: (eks.hantar || {})[net] || '' };
   }
+  const uniq = a => [...new Set(a)];
   return {
-    tiangBaru: tb ? { ...parseT(tb), net: tb.startsWith('HUTM') ? 'TM' : 'TR' } : null,
+    tiangBaru: tb ? { jenis: 'besi', tinggi: String(tb.tinggi), net: tb.net } : null,
     tiangEks: eks.tiang || null,
-    tiangBongkar: bt ? parseT(bt) : null,
-    trafoBaru: trafo ? { daya: (keyName(trafo).match(/\d+/) || [''])[0], tipe: keyGroup(trafo) } : null,
-    trafoBongkar: has('BONGKAR|GARDU DISTRIBUSI|').length > 0,
+    tiangBongkar: bt ? { jenis: eks.tiang || 'besi', tinggi: String(bt.tinggi) } : null,
+    trafoBaru: trafo ? { daya: String(trafo.daya), tipe: trafo.grp } : null,
+    trafoBongkar: kind('btrafo').length > 0,
     garduEks: eks.gardu ? { daya: eks.dayaGardu || '' } : null,
-    konsTM: has('HUTM|KONSTRUKSI|').map(keyName),
-    konsTR: has('HUTR|KONSTRUKSI|').map(keyName).filter(n => n !== 'Grounding').map(n => n.replace(/ TR$/, '')),
-    grounding: !!m['HUTR|KONSTRUKSI|Grounding'],
-    skur: has('HUTM|SKUR|Skur').length + has('HUTR|SKUR|Skur').length > 0,
-    spanGuy: has('HUTM|SKUR|Spunh').length + has('HUTR|SKUR|Spunh').length > 0,
+    konsTM: uniq(kind('kons').filter(r => r.net === 'TM').map(r => r.short)),
+    konsTR: uniq(kind('kons').filter(r => r.net === 'TR').map(r => r.short)),
+    grounding: kind('ground').length > 0,
+    skur: kind('skur').length > 0,
+    spanGuy: kind('span').length > 0,
     nets,
   };
 }
@@ -121,16 +204,16 @@ function segLen(sv, p) {
 
 function computeMaterial(sv) {
   const st = sv.settings || {};
-  const tol = +(st.toleransi ?? 3), bulat = +(st.bulat ?? 1) || 1;
+  const tol = +(st.toleransi ?? 0), bulat = +(st.bulat ?? 1) || 1;
   const auto = {}, raw = {}, warn = [];
   const add = (k, q) => { auto[k] = (auto[k] || 0) + q; };
   for (const p of sv.points) {
     for (const [k, v] of Object.entries(p.mat || {})) {
-      if (keyGroup(k) === 'KABEL' && (v === 'auto' || v === '' || v == null)) {
+      if (isKabel(k) && (v === 'auto' || v === '' || v == null)) {
         const L = segLen(sv, p);
         if (!L) warn.push(`${keyName(k)} di titik ${p.no || ''} belum punya induk – panjang kabel 0`);
         raw[k] = (raw[k] || 0) + L;
-      } else add(k, +v || (keyGroup(k) === 'KABEL' ? 0 : 1));
+      } else add(k, +v || (isKabel(k) ? 0 : 1));
     }
   }
   const len = {};
@@ -139,7 +222,7 @@ function computeMaterial(sv) {
     add(k, k.startsWith('BONGKAR') ? Math.round(m) : Math.ceil(m * (1 + tol / 100) / bulat) * bulat);
   }
   const sections = MAT_SECTIONS.map(s => ({ key: s.key, title: s.title, color: s.color,
-    groups: s.groups.map(g => ({ t: g.t, rows: g.rows.map(r => ({ name: r[0], unit: r[1], key: `${s.key}|${g.t}|${r[0]}` })) })) }));
+    groups: s.groups.map(g => ({ t: g.t, rows: g.rows.map(r => ({ ...r, key: `${s.key}|${g.t}|${r.name}` })) })) }));
   const ensure = (k, unit) => {
     const [sec, grp, name] = k.split('|'); const s = sections.find(x => x.key === sec); if (!s) return;
     let g = s.groups.find(x => x.t === grp); if (!g) { g = { t: grp, rows: [] }; s.groups.push(g); }
@@ -157,7 +240,7 @@ function computeMaterial(sv) {
 // Katalog untuk editor titik (semua baris baku + tambahan survei)
 function catalog(sv) {
   return MAT_SECTIONS.map(s => ({ key: s.key, title: s.title, color: s.color,
-    groups: s.groups.map(g => ({ t: g.t, rows: [...g.rows.map(r => ({ name: r[0], unit: r[1], key: `${s.key}|${g.t}|${r[0]}` })),
+    groups: s.groups.map(g => ({ t: g.t, rows: [...g.rows.map(r => ({ ...r, key: `${s.key}|${g.t}|${r.name}` })),
       ...Object.entries(sv.materialExtra || {}).filter(([k]) => k.startsWith(`${s.key}|${g.t}|`)).map(([k, u]) => ({ name: keyName(k), unit: u, key: k, extra: true }))] })) }));
 }
 
@@ -264,36 +347,31 @@ function renderSheet(ctx, sv, opts = {}) {
   rect(ctx, L.border.x, L.border.y, L.border.w, L.border.h, null, 1.6);
   ctx.beginPath(); ctx.moveTo(L.left, L.border.y); ctx.lineTo(L.left, L.bottom); ctx.lineWidth = 1.2; ctx.stroke();
 
-  // --- tabel kebutuhan material (2 kolom: HUTM+HUTR | Gardu+Pembongkaran) ---
+  // --- tabel kebutuhan material: hanya baris yang terisi, nama sesuai FORMAT RAB ---
   const mat = computeMaterial(sv);
   const mx = L.border.x, mw = L.left - L.border.x;
-  const nRows = secs => secs.reduce((a, s) => a + 1 + s.groups.reduce((b, g) => b + 1 + g.rows.length, 0), 0);
-  const colA = mat.sections.filter(s => s.key === 'HUTM' || s.key === 'HUTR');
-  const colB = mat.sections.filter(s => s.key === 'GARDU' || s.key === 'BONGKAR');
-  const y0 = L.border.y + 8, rh = Math.min(10.5, 400 / (Math.max(nRows(colA), nRows(colB)) + 1));
-  rect(ctx, mx, y0, mw, rh + 2, '#fff'); cellText(ctx, 'KEBUTUHAN MATERIAL', mx, y0, mw, rh + 2, { bold: true, align: 'center', size: 7.5 });
-  let yEnd = y0;
-  const fs = Math.min(6.6, rh * 0.68);
-  [colA, colB].forEach((secs, ci) => {
-    const cw = mw / 2, x = mx + ci * cw, cn = 9, cq = 22, cu = 17, cname = cw - cn - cq - cu;
-    let y = y0 + rh + 2;
-    for (const s of secs) {
-      rect(ctx, x, y, cw, rh, s.color); cellText(ctx, s.title, x, y, cw, rh, { bold: true, align: 'center', size: fs }); y += rh;
-      s.groups.forEach((g, gi) => {
-        rect(ctx, x, y, cn, rh); rect(ctx, x + cn, y, cw - cn, rh, '#f2f2f2');
-        cellText(ctx, gi + 1, x, y, cn, rh, { bold: true, align: 'center', size: fs });
-        cellText(ctx, g.t, x + cn, y, cw - cn, rh, { bold: true, size: fs }); y += rh;
-        for (const r of g.rows) {
-          rect(ctx, x, y, cn, rh); rect(ctx, x + cn, y, cname, rh); rect(ctx, x + cn + cname, y, cq, rh); rect(ctx, x + cn + cname + cq, y, cu, rh);
-          cellText(ctx, r.name, x + cn, y, cname, rh, { size: fs });
-          cellText(ctx, r.qty, x + cn + cname, y, cq, rh, { align: 'center', bold: true, size: fs });
-          cellText(ctx, r.unit, x + cn + cname + cq, y, cu, rh, { align: 'center', size: fs * 0.9 });
-          y += rh;
-        }
-      });
-    }
-    yEnd = Math.max(yEnd, y);
-  });
+  const used = mat.sections.map(s => ({ ...s, groups: s.groups.map(g => ({ ...g, rows: g.rows.filter(r => r.qty !== '' && +r.qty !== 0) })).filter(g => g.rows.length) })).filter(s => s.groups.length);
+  const nRows = used.reduce((a, s) => a + 1 + s.groups.reduce((b, g) => b + 1 + g.rows.length, 0), 0);
+  const y0 = L.border.y + 8, rh = Math.max(8, Math.min(12, 430 / Math.max(nRows + 1, 1)));
+  const fs = Math.min(7, rh * 0.62), cn = 12, cq = 30, cu = 26, cname = mw - cn - cq - cu;
+  rect(ctx, mx, y0, mw, rh + 3, '#fff'); cellText(ctx, 'KEBUTUHAN MATERIAL', mx, y0, mw, rh + 3, { bold: true, align: 'center', size: 8 });
+  let yEnd = y0 + rh + 3;
+  if (!used.length) { rect(ctx, mx, yEnd, mw, rh * 2); cellText(ctx, '(belum ada material dipilih)', mx, yEnd, mw, rh * 2, { align: 'center', size: fs, color: '#777' }); yEnd += rh * 2; }
+  for (const s of used) {
+    rect(ctx, mx, yEnd, mw, rh, s.color); cellText(ctx, s.title, mx, yEnd, mw, rh, { bold: true, align: 'center', size: fs }); yEnd += rh;
+    s.groups.forEach((g, gi) => {
+      rect(ctx, mx, yEnd, cn, rh); rect(ctx, mx + cn, yEnd, mw - cn, rh, '#f2f2f2');
+      cellText(ctx, gi + 1, mx, yEnd, cn, rh, { bold: true, align: 'center', size: fs });
+      cellText(ctx, g.t, mx + cn, yEnd, mw - cn, rh, { bold: true, size: fs }); yEnd += rh;
+      for (const r of g.rows) {
+        rect(ctx, mx, yEnd, cn, rh); rect(ctx, mx + cn, yEnd, cname, rh); rect(ctx, mx + cn + cname, yEnd, cq, rh); rect(ctx, mx + cn + cname + cq, yEnd, cu, rh);
+        cellText(ctx, r.name, mx + cn, yEnd, cname, rh, { size: fs });
+        cellText(ctx, r.qty, mx + cn + cname, yEnd, cq, rh, { align: 'center', bold: true, size: fs });
+        cellText(ctx, r.unit, mx + cn + cname + cq, yEnd, cu, rh, { align: 'center', size: fs * 0.92 });
+        yEnd += rh;
+      }
+    });
+  }
   const y = yEnd;
   // --- keterangan (legenda) ---
   const ky = y + 6, kh = L.bottom - ky;
@@ -439,17 +517,43 @@ function drawNetwork(ctx, sv, hits, opts) {
   const s = Math.min(net.w / sx, net.h / sy);
   const ox = net.x + (net.w - sx * s) / 2, oy = net.y + (net.h - sy * s) / 2;
   const pos = {};
-  for (const p of pts) {
-    const bx = pts.length === 1 ? net.x + net.w / 2 : ox + (p.lng * kx - minX) * s;
-    const by = pts.length === 1 ? net.y + net.h / 2 : oy + (-p.lat * ky - minY) * s;
-    pos[p.id] = { x: bx + (p.ox || 0), y: by + (p.oy || 0) };
-  }
+  const proj = (lat, lng) => pts.length === 1
+    ? { x: net.x + net.w / 2 + (lng - pts[0].lng) * kx * 4, y: net.y + net.h / 2 - (lat - pts[0].lat) * ky * 4 }
+    : { x: ox + (lng * kx - minX) * s, y: oy + (-lat * ky - minY) * s };
+  for (const p of pts) pos[p.id] = proj(p.lat, p.lng);  // posisi dasar (ujung kabel) – tidak ikut digeser
   const byId = Object.fromEntries(pts.map(p => [p.id, p]));
-  // jalan
-  ctx.save(); ctx.lineCap = 'round';
+  // --- jalan: dari peta OSM (opsional) + titik jalan manual, dipotong di area gambar ---
+  ctx.save(); ctx.beginPath(); ctx.rect(D.x, D.y, D.w, D.h); ctx.clip(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const roadLines = []; // {name, a, b}
+  if (sv.showRoads !== false) for (const r of sv.roads || []) {
+    const xy = r.pts.map(([la, lo]) => proj(la, lo));
+    ctx.strokeStyle = '#a8a8a8'; ctx.lineWidth = r.major ? 12 : 9; ctx.beginPath();
+    xy.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)); ctx.stroke();
+    for (let i = 1; i < xy.length; i++) roadLines.push({ name: r.name, a: xy[i - 1], b: xy[i] });
+  }
   for (const p of pts) if (p.type === 'jalan' && p.parent && pos[p.parent]) {
     const a = pos[p.parent], b = pos[p.id];
     ctx.strokeStyle = '#9a9a9a'; ctx.lineWidth = 11; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    roadLines.push({ name: p.nama || (byId[p.parent] || {}).nama || '', a, b });
+  }
+  // nama jalan: satu label per nama, di ruas terpanjang yang terlihat
+  const inside = q => q.x > D.x + 20 && q.x < D.x + D.w - 20 && q.y > D.y + 15 && q.y < D.y + D.h - 15;
+  const best = {};
+  for (const l of roadLines) {
+    if (!l.name) continue;
+    const m = { x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 }, len = Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y);
+    if (!inside(m) || len < 40) continue;
+    if (!best[l.name] || len > best[l.name].len) best[l.name] = { ...l, m, len };
+  }
+  for (const l of Object.values(best)) {
+    let ang = Math.atan2(l.b.y - l.a.y, l.b.x - l.a.x);
+    if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
+    const t = String(l.name).toUpperCase();
+    ctx.save(); ctx.translate(l.m.x, l.m.y); ctx.rotate(ang);
+    ctx.font = `bold 7.5px ${FONT}`; ctx.textBaseline = 'middle';
+    const w = Math.min(ctx.measureText(t).width, l.len - 6);
+    ctx.fillStyle = '#3a3a3a'; ctx.fillText(t, -w / 2, -11, l.len - 6);
+    ctx.restore();
   }
   ctx.restore();
   // jaringan: satu garis per jaringan pada ruas (TM merah, TR biru; eksisting penuh, rencana putus-putus, bongkar titik-titik)
@@ -459,16 +563,18 @@ function drawNetwork(ctx, sv, hits, opts) {
     const ls = netLines(p);
     ls.forEach((l, i) => strokeNet(ctx, pos[q.id], pos[p.id], l, i, ls.length, 1, false));
   }
-  const reg = (kind, p, x, y, w, h) => hits.push({ kind, id: p.id, x, y, w, h });
+  // area yang bisa digeser: f = nama properti offset, v = nilai offset sekarang
+  const reg = (kind, p, x, y, w, h, f, v) => hits.push({ kind, id: p.id, x, y, w, h, f, v });
   for (const p of pts) {
-    const P = pos[p.id];
+    const B = pos[p.id];
     if (p.type === 'jalan') continue;
+    const o = [p.ox || 0, p.oy || 0], P = { x: B.x + o[0], y: B.y + o[1] };
     if (p.type === 'label') {
       ctx.save(); ctx.font = `bold 11px ${FONT}`; ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
       const lines = String(p.teks || '').toUpperCase().split('\n');
       const w = Math.max(...lines.map(l => ctx.measureText(l).width));
       lines.forEach((ln, i) => ctx.fillText(ln, P.x - ctx.measureText(ln).width / 2, P.y + (i - (lines.length - 1) / 2) * 12));
-      ctx.restore(); reg('sym', p, P.x - w / 2 - 4, P.y - lines.length * 6 - 4, w + 8, lines.length * 12 + 8);
+      ctx.restore(); reg('sym', p, P.x - w / 2 - 4, P.y - lines.length * 6 - 4, w + 8, lines.length * 12 + 8, ['ox', 'oy'], o);
       continue;
     }
     let info;
@@ -477,38 +583,53 @@ function drawNetwork(ctx, sv, hits, opts) {
       ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(P.x - 38, P.y - 18, 76, 36);
       cellText(ctx, 'PELANGGAN', P.x - 38, P.y - 16, 76, 18, { align: 'center', size: 9 });
       if (p.nama) cellText(ctx, p.nama, P.x - 38, P.y + 1, 76, 14, { align: 'center', size: 6.5 });
-      ctx.restore(); reg('sym', p, P.x - 38, P.y - 18, 76, 36);
+      ctx.restore(); reg('sym', p, P.x - 38, P.y - 18, 76, 36, ['ox', 'oy'], o);
       info = pointInfo(p);
     } else {
-      info = drawPointSymbols(ctx, p, P.x, P.y, 1.05); reg('sym', p, P.x - 12, P.y - 12, 24, 24);
+      info = pointInfo(p);
+      const k = 1.05;
+      const old = info.tiangBongkar || info.tiangEks ? { type: 'tiang', status: info.tiangBongkar ? 'bongkar' : 'eks', jenis: info.tiangEks || (info.tiangBongkar || {}).jenis } : null;
+      if (hasTiang(info)) {
+        if (info.tiangBaru) { SurveyMap.symbol(ctx, { type: 'tiang', status: 'rencana' }, P.x, P.y, k); if (old) SurveyMap.symbol(ctx, old, P.x - 17, P.y, k * 0.8); }
+        else SurveyMap.symbol(ctx, old, P.x, P.y, k);
+        reg('sym', p, P.x - 11, P.y - 11, 22, 22, ['ox', 'oy'], o);
+      }
+      if (hasGardu(info)) {
+        const g = [p.gdx ?? (hasTiang(info) ? 17 : 0), p.gdy ?? 0], G = { x: B.x + g[0], y: B.y + g[1] };
+        SurveyMap.symbol(ctx, { type: 'gardu', status: info.trafoBaru && !info.garduEks ? 'rencana' : 'eks' }, G.x, G.y, k);
+        reg('gardu', p, G.x - 11, G.y - 11, 22, 21, ['gdx', 'gdy'], g);
+        ctx.save(); ctx.font = `bold 9.5px ${FONT}`; ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
+        const gl = [p.gx ?? 13, p.gy ?? 0], gx = G.x + gl[0], gy = G.y + gl[1];
+        const de = info.garduEks && info.garduEks.daya, db = info.trafoBaru && info.trafoBaru.daya;
+        const l1 = (p.kode || '').toUpperCase();
+        const l2 = de && db && de !== db ? `${de} → ${db} KVA` : (db || de) ? `${db || de} KVA` : '';
+        ctx.fillText(l1, gx, gy - 6); ctx.fillText(l2, gx, gy + 6);
+        const w = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width, 10);
+        ctx.restore(); reg('glbl', p, gx, gy - 12, w, 24, ['gx', 'gy'], gl);
+      }
+      if (!hasTiang(info) && !hasGardu(info)) {
+        ctx.save(); ctx.beginPath(); ctx.arc(P.x, P.y, 3.5, 0, 7); ctx.fillStyle = '#555'; ctx.fill(); ctx.restore();
+        reg('sym', p, P.x - 8, P.y - 8, 16, 16, ['ox', 'oy'], o);
+      }
     }
-    if (info.skur) skurIcon(ctx, P.x - 6, P.y + 12, 18);
-    if (info.spanGuy) skurIcon(ctx, P.x - 6, P.y + 17, 24);
-    if (info.grounding) groundIcon(ctx, P.x + 2, P.y + 12, 18);
+    // aksesori tiang: masing-masing bisa digeser sendiri
+    if (info.skur) { const v = [p.skx ?? -6, p.sky ?? 12]; skurIcon(ctx, B.x + v[0], B.y + v[1], 18); reg('skur', p, B.x + v[0] - 3, B.y + v[1] - 6, 22, 12, ['skx', 'sky'], v); }
+    if (info.spanGuy) { const v = [p.spx ?? -6, p.spy ?? 19]; skurIcon(ctx, B.x + v[0], B.y + v[1], 24); ctx.save(); ctx.font = `6px ${FONT}`; ctx.fillText('SG', B.x + v[0] + 26, B.y + v[1] + 2); ctx.restore(); reg('span', p, B.x + v[0] - 3, B.y + v[1] - 6, 36, 12, ['spx', 'spy'], v); }
+    if (info.grounding) { const v = [p.grx ?? 6, p.gry ?? 12]; groundIcon(ctx, B.x + v[0], B.y + v[1], 18); reg('ground', p, B.x + v[0] - 3, B.y + v[1] - 6, 22, 12, ['grx', 'gry'], v); }
     if (p.type === 'jaringan' && (info.tiangBaru || (hasTiang(info) && p.showBubble))) {
       const t = info.tiangBaru || info.tiangBongkar || {};
-      const bx = P.x + (p.lx ?? 0), by = P.y + (p.ly ?? -34);
+      const lv = [p.lx ?? 0, p.ly ?? -34], bx = P.x + lv[0], by = P.y + lv[1];
       poleBubble(ctx, bx, by, 17, String(p.no || ''), String(t.tinggi || ''), info.konsTM.join(' '), info.konsTR.join(' '));
-      reg('lbl', p, bx - 18, by - 17, 36, 34);
-    }
-    if (p.type === 'jaringan' && hasGardu(info)) {
-      ctx.save(); ctx.font = `bold 9.5px ${FONT}`; ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
-      const gx = P.x + (p.gx ?? (hasTiang(info) ? 30 : 14)), gy = P.y + (p.gy ?? 0);
-      const de = info.garduEks && info.garduEks.daya, db = info.trafoBaru && info.trafoBaru.daya;
-      const l1 = (p.kode || '').toUpperCase();
-      const l2 = de && db && de !== db ? `${de} → ${db} KVA` : (db || de) ? `${db || de} KVA` : '';
-      ctx.fillText(l1, gx, gy - 6); ctx.fillText(l2, gx, gy + 6);
-      const w = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width, 10);
-      ctx.restore(); reg('glbl', p, gx, gy - 12, w, 24);
+      reg('lbl', p, bx - 18, by - 17, 36, 34, ['lx', 'ly'], lv);
     }
     if (p.showKoord) {
       ctx.save(); ctx.font = `bold 8.5px ${FONT}`; ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
-      const cx = P.x + (p.kx ?? 0), cy = P.y + (p.ky ?? 30);
+      const kv = [p.kx ?? 0, p.ky ?? 30], cx = P.x + kv[0], cy = P.y + kv[1];
       const t2 = `${p.lat.toFixed(6)} ${p.lng.toFixed(6)}`;
       const w = Math.max(ctx.measureText('TITIK KOORDINAT').width, ctx.measureText(t2).width);
       ctx.fillText('TITIK KOORDINAT', cx - ctx.measureText('TITIK KOORDINAT').width / 2, cy - 5);
       ctx.fillText(t2, cx - ctx.measureText(t2).width / 2, cy + 6);
-      ctx.restore(); reg('koord', p, cx - w / 2, cy - 11, w, 22);
+      ctx.restore(); reg('koord', p, cx - w / 2, cy - 11, w, 22, ['kx', 'ky'], kv);
     }
   }
   // catatan rencana: kolom kiri, garis titik-titik + panah menuju teks
@@ -526,13 +647,13 @@ function drawNetwork(ctx, sv, hits, opts) {
     const w = Math.max(...lines.map(l => ctx.measureText(l).width));
     ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
     lines.forEach((ln, i) => ctx.fillText(ln, nx - ctx.measureText(ln).width / 2, ny + (i - (lines.length - 1) / 2) * 10.5));
-    const P = pos[p.id];
+    const P = { x: pos[p.id].x + (p.ox || 0), y: pos[p.id].y + (p.oy || 0) };
     const ex = P.x > nx ? nx + w / 2 + 4 : nx - w / 2 - 4;
     ctx.strokeStyle = '#000'; ctx.lineWidth = 0.8; ctx.setLineDash([1.6, 1.6]);
     ctx.beginPath(); ctx.moveTo(P.x, P.y); ctx.lineTo(ex, ny); ctx.stroke(); ctx.setLineDash([]);
     arrowHead(ctx, ex, ny, Math.atan2(ny - P.y, ex - P.x), 5);
     ctx.restore();
-    reg('note', p, nx - w / 2, ny - h / 2, w, h);
+    reg('note', p, nx - w / 2, ny - h / 2, w, h, ['nx', 'ny'], [nx, ny]);
   }
 }
 

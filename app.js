@@ -12,7 +12,7 @@ let gpsFix = null, gpsHist = [], follow = false, watchId = null;
 let map = null;
 
 function loadSettings() {
-  try { return Object.assign({ kop: 'PT PLN (PERSERO)\nUID SUMATERA UTARA\nUP3 NIAS', toleransi: 3, bulat: 1, surveyor: '', digambar: '', diketahui: '', disetujui: '', logo: '' }, JSON.parse(localStorage.getItem('survei-settings') || '{}')); }
+  try { return Object.assign({ kop: 'PT PLN (PERSERO)\nUID SUMATERA UTARA\nUP3 NIAS', toleransi: 0, bulat: 1, surveyor: '', digambar: '', diketahui: '', disetujui: '', logo: '' }, JSON.parse(localStorage.getItem('survei-settings') || '{}')); }
   catch { return {}; }
 }
 function saveSettings() { localStorage.setItem('survei-settings', JSON.stringify(G)); }
@@ -132,7 +132,7 @@ document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e =
 
 // ================= SURVEI =================
 function openSurvey(s) {
-  S = s; S.points ||= []; S.points.forEach(migratePoint); if (S.lastType === 'tiang' || S.lastType === 'gardu') S.lastType = 'jaringan'; S.material ||= {}; S.materialExtra ||= {}; S.uraian ||= {}; S.settings ||= {};
+  S = s; S.points ||= []; S.points.forEach(migratePoint); S.points.forEach(p => migrateMatKeys(p, S.materialExtra)); for (const k of Object.keys(S.material || {})) if (!CAT[k] && !(k in (S.materialExtra || {}))) delete S.material[k]; if (S.lastType === 'tiang' || S.lastType === 'gardu') S.lastType = 'jaringan'; S.material ||= {}; S.materialExtra ||= {}; S.uraian ||= {}; S.settings ||= {};
   selected = null;
   $('#scHome').classList.remove('on'); $('#scSurvey').classList.add('on');
   $('#svTitle').textContent = S.judul || 'Survei';
@@ -280,13 +280,13 @@ const edOpen = new Set();
 function autoLenText(p, key) {
   const L = segLen(S, p); if (!L) return 'butuh induk';
   if (key.startsWith('BONGKAR')) return Math.round(L) + ' m';
-  const st = S.settings || {}, tol = +(st.toleransi ?? 3), b = +(st.bulat ?? 1) || 1;
+  const st = S.settings || {}, tol = +(st.toleransi ?? 0), b = +(st.bulat ?? 1) || 1;
   return Math.ceil(L * (1 + tol / 100) / b) * b + ' m';
 }
 function materialPicker(p) {
   const m = p.mat || {}; const cat = catalog(S);
   const sel = Object.entries(m);
-  let h = `<div class="selbox">${sel.length ? sel.map(([k, v]) => `<span class="selchip">${k.startsWith('BONGKAR') ? 'Bongkar ' : ''}${esc(keyName(k))}${keyGroup(k) === 'KABEL' ? ' · ' + (v === 'auto' ? autoLenText(p, k) : v + ' m') : +v > 1 ? ' ×' + v : ''}<button data-unsel="${esc(k)}">✕</button></span>`).join('')
+  let h = `<div class="selbox">${sel.length ? sel.map(([k, v]) => `<span class="selchip">${k.startsWith('BONGKAR') ? 'Bongkar ' : ''}${esc(keyName(k))}${isKabel(k) ? ' · ' + (v === 'auto' ? autoLenText(p, k) : v + ' m') : +v > 1 ? ' ×' + v : ''}<button data-unsel="${esc(k)}">✕</button></span>`).join('')
     : '<span class="mut">Belum ada material. Ketuk kelompok di bawah untuk memilih (boleh lebih dari satu).</span>'}</div>`;
   h += '<div class="acc">';
   for (const s of cat) {
@@ -303,7 +303,7 @@ function materialPicker(p) {
         const q = !on ? `<span class="mut">${r.unit}</span>` : kab
           ? `<input class="q" data-q="${esc(r.key)}" inputmode="decimal" value="${v === 'auto' ? '' : esc(v)}" placeholder="${esc(autoLenText(p, r.key))}"><span class="mut">m</span>`
           : `<input class="q" data-q="${esc(r.key)}" inputmode="decimal" value="${esc(v)}"><span class="mut">${r.unit}</span>`;
-        h += `<div class="mi ${on ? 'on' : ''}" data-mi="${esc(r.key)}"><span class="ck">${on ? '✓' : ''}</span><span class="grow">${esc(r.name)}</span>${q}</div>`;
+        h += `<div class="mi ${on ? 'on' : ''}" data-mi="${esc(r.key)}"><span class="ck">${on ? '✓' : ''}</span><span class="grow">${esc(r.name)}${r.note ? `<br><small class="mut">${esc(r.note)}</small>` : ''}</span>${q}</div>`;
       }
     });
   }
@@ -351,7 +351,8 @@ async function openEditor(id, fresh) {
   } else if (p.type === 'label') {
     h += `<label class="f">Teks pada gambar (contoh: ARAH GUNUNGSITOLI)</label><textarea class="i" data-k="teks">${esc(p.teks)}</textarea>`;
   } else {
-    h += `<p class="mut">Titik jalan disambung jadi garis jalan pada gambar. Tag sepanjang tepi jalan.</p>
+    h += `<p class="mut">Titik jalan disambung jadi garis jalan pada gambar. Tag di ujung-ujung dan belokan jalan. Untuk jalan dari peta otomatis, pakai tombol di tab PDF.</p>
+      <label class="f">Nama jalan</label><input class="i" data-k="nama" value="${esc(p.nama)}" placeholder="mis. JL. DIPONEGORO">
       <label class="f">Tersambung dari</label><select class="i" data-k="parent">${opt([['', '– awal jalan –'], ...others.map(o => [o.id, pointName(o)])], p.parent || '')}</select>`;
   }
   h += `<div class="row" style="margin-top:14px"><button class="btn red" data-act="del">Hapus titik</button><span class="grow"></span>
@@ -379,7 +380,7 @@ $('#ptSheet').addEventListener('click', async e => {
     const k = mi.dataset.mi;
     if (k in p.mat) delete p.mat[k];
     else {
-      p.mat[k] = keyGroup(k) === 'KABEL' ? 'auto' : 1;
+      p.mat[k] = isKabel(k) ? 'auto' : 1;
       if (k.startsWith('GARDU|') && !p.kode) edOpen.add('ed.det');
     }
     changed(p); return;
@@ -428,7 +429,7 @@ $('#ptSheet').addEventListener('change', e => {
   const p = P(editing); if (!p) return; const t = e.target;
   if (t.dataset.q) {
     const k = t.dataset.q, v = t.value.trim().replace(',', '.');
-    p.mat[k] = keyGroup(k) === 'KABEL' ? (v === '' ? 'auto' : +v || 'auto') : (+v > 0 ? +v : 1);
+    p.mat[k] = isKabel(k) ? (v === '' ? 'auto' : +v || 'auto') : (+v > 0 ? +v : 1);
     changed(p); return;
   }
   const k = t.dataset.k; if (!k) return;
@@ -486,9 +487,9 @@ const matOpen = new Set();
 function renderMaterial() {
   const m = computeMaterial(S); const st = S.settings;
   let h = `<div class="card"><div class="grid2">
-      <div><label class="f">Toleransi kabel (%)</label><input class="i" id="mTol" type="number" value="${st.toleransi ?? 3}"></div>
+      <div><label class="f">Tambahan kabel (%)</label><input class="i" id="mTol" type="number" value="${st.toleransi ?? 0}"></div>
       <div><label class="f">Pembulatan kabel (m)</label><input class="i" id="mBul" type="number" value="${st.bulat ?? 1}"></div></div>
-      <p class="mut">Total dari material yang dipilih di setiap titik. Kabel otomatis = panjang ruas dari induk × toleransi (kabel bongkar tanpa toleransi). Ketik angka di kolom <b>Pakai</b> untuk mengganti; kosongkan untuk kembali ke otomatis.</p>
+      <p class="mut">Total dari material yang dipilih di setiap titik. Nama dan susunan mengikuti FORMAT RAB UNTUK KR. Kabel otomatis = panjang jalur dari titik induk (andongan & ×3 phasa AAAC sudah dihitung di RAB); isi Tambahan kabel bila perlu cadangan. Ketik angka di kolom <b>Pakai</b> untuk mengganti; kosongkan untuk kembali ke otomatis.</p>
       ${Object.entries(m.len).map(([k, v]) => `<div class="mut">Ukur ${esc(k)}: ${v.toFixed(1)} m</div>`).join('')}
       ${m.warn.map(w => `<div style="color:var(--warn);font-size:13px">⚠ ${esc(w)}</div>`).join('')}</div>
     <div class="card" style="padding:0;overflow:hidden"><table class="m"><tr><th>Material <span class="mut" style="font-weight:400">(ketuk untuk buka)</span></th><th>Otomatis</th><th>Pakai</th><th></th></tr>`;
@@ -511,8 +512,8 @@ function renderMaterial() {
   h += `</table></div>
     <div class="card"><b>Tambah baris material lain</b>
       <label class="f">Masuk ke</label><select class="i" id="exSec">${opt(grpOpts, 'HUTR|KONSTRUKSI')}</select>
-      <div class="grid2"><div><label class="f">Nama material</label><input class="i" id="exName" placeholder="mis. X2 TR"></div>
-      <div><label class="f">Satuan</label><select class="i" id="exUnit">${opt(['Btg', 'Mtr', 'Set', 'Unit', 'Bh'], 'Set')}</select></div></div>
+      <div class="grid2"><div><label class="f">Nama material</label><input class="i" id="exName" placeholder="nama persis seperti di RAB"></div>
+      <div><label class="f">Satuan</label><select class="i" id="exUnit">${opt(['Unit', 'Btg', 'Mtr', 'Set', 'Bh', 'Tiang', 'Plgn'], 'Unit')}</select></div></div>
       <button class="btn" id="exAdd" style="margin-top:8px">Tambah</button></div>`;
   $('#matView').innerHTML = h;
   $('#mTol').onchange = e => { S.settings.toleransi = +e.target.value || 0; save(); renderMaterial(); };
@@ -575,45 +576,88 @@ async function renderPdfTab() {
       <label class="mut"><input type="checkbox" id="pdfPhotos" ${nPhoto ? 'checked' : ''}> Lampiran foto (${nPhoto})</label>
       <span class="grow"></span><button class="btn sm" id="pdfZoom">Perbesar</button><button class="btn sm" id="pdfReset">Reset posisi</button>
     </div>
+    <div class="card" style="padding:10px">
+      <div class="row"><b class="grow">Jalan pada gambar</b>
+        <label class="mut"><input type="checkbox" id="rdShow" ${S.showRoads !== false ? 'checked' : ''}> Tampilkan</label></div>
+      <div class="mut" id="rdInfo">${roadInfo()}</div>
+      <div class="row" style="margin-top:8px"><button class="btn sm pri" id="rdFetch">Ambil jalan dari peta</button>
+        ${(S.roads || []).length ? '<button class="btn sm red" id="rdClear">Hapus jalan peta</button>' : ''}</div>
+      <div id="rdNames"></div>
+    </div>
     <div id="pvWrap" style="overflow:auto;max-height:70vh;border-radius:6px"><canvas id="pv"></canvas></div>
-    <p class="mut">Pratinjau. Geser simbol, label tiang, teks koordinat, atau catatan dengan jari untuk merapikan gambar. Posisi GPS asli tidak berubah.</p>
+    <p class="mut">Pratinjau. Geser tiang, trafo, skur, grounding, label, teks koordinat, atau catatan dengan jari. Garis kabel tetap di tempatnya; posisi GPS asli tidak berubah.</p>
     <div id="pvWarn"></div>`;
   pv = $('#pv'); logoImg = await loadLogo();
   drawPreview();
   pv.onpointerdown = e => {
     const r = pv.getBoundingClientRect(), k = PAGE.w / r.width;
     const x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
-    const order = ['lbl', 'glbl', 'koord', 'note', 'sym'];
+    const order = ['lbl', 'glbl', 'koord', 'note', 'skur', 'span', 'ground', 'gardu', 'sym'];
     const hit = [...pvHits].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind))
       .find(h => x >= h.x - 4 && x <= h.x + h.w + 4 && y >= h.y - 4 && y <= h.y + h.h + 4);
-    if (!hit) return;
-    pv.setPointerCapture(e.pointerId); const p = P(hit.id);
-    if (hit.kind === 'note' && p.nx == null) { p.nx = hit.x + hit.w / 2; p.ny = hit.y + hit.h / 2; }
-    drag = { hit, p, x, y, k };
+    if (!hit || !hit.f) return;
+    pv.setPointerCapture(e.pointerId);
+    drag = { p: P(hit.id), f: hit.f, v0: [...hit.v], x0: x, y0: y, k };
   };
   pv.onpointermove = e => {
     if (!drag) return; const r = pv.getBoundingClientRect();
-    const x = (e.clientX - r.left) * drag.k, y = (e.clientY - r.top) * drag.k, dx = x - drag.x, dy = y - drag.y;
-    drag.x = x; drag.y = y; const p = drag.p;
-    if (drag.hit.kind === 'sym') { p.ox = (p.ox || 0) + dx; p.oy = (p.oy || 0) + dy; }
-    if (drag.hit.kind === 'lbl') { p.lx = (p.lx ?? 0) + dx; p.ly = (p.ly ?? -34) + dy; }
-    if (drag.hit.kind === 'glbl') { p.gx = (p.gx ?? (hasTiang(pointInfo(p)) ? 30 : 14)) + dx; p.gy = (p.gy ?? 0) + dy; }
-    if (drag.hit.kind === 'koord') { p.kx = (p.kx ?? 0) + dx; p.ky = (p.ky ?? 30) + dy; }
-    if (drag.hit.kind === 'note') { p.nx += dx; p.ny += dy; }
+    const x = (e.clientX - r.left) * drag.k, y = (e.clientY - r.top) * drag.k;
+    drag.p[drag.f[0]] = drag.v0[0] + (x - drag.x0); drag.p[drag.f[1]] = drag.v0[1] + (y - drag.y0);
     drawPreview();
   };
   pv.onpointerup = pv.onpointercancel = () => { if (drag) { drag = null; save(); } };
   $('#pdfReset').onclick = () => {
     if (!confirm('Kembalikan semua posisi simbol, label dan catatan ke posisi otomatis?')) return;
-    S.points.forEach(p => ['ox', 'oy', 'lx', 'ly', 'gx', 'gy', 'kx', 'ky', 'nx', 'ny'].forEach(k => delete p[k])); save(); drawPreview();
+    S.points.forEach(p => ['ox', 'oy', 'lx', 'ly', 'gx', 'gy', 'gdx', 'gdy', 'skx', 'sky', 'spx', 'spy', 'grx', 'gry', 'kx', 'ky', 'nx', 'ny'].forEach(k => delete p[k])); save(); drawPreview();
   };
   $('#pdfZoom').onclick = () => {
     const big = pv.style.width !== '280%'; pv.style.width = big ? '280%' : '100%';
     $('#pdfZoom').textContent = big ? 'Perkecil' : 'Perbesar'; drawPreview();
     if (big) { const w = $('#pvWrap'); w.scrollLeft = w.scrollWidth * 0.3; }
   };
+  $('#rdShow').onchange = e => { S.showRoads = e.target.checked; save(); drawPreview(); };
+  $('#rdFetch').onclick = fetchRoads;
+  if ($('#rdClear')) $('#rdClear').onclick = () => { if (!confirm('Hapus semua jalan hasil ambil dari peta?')) return; S.roads = []; save(); renderPdfTab(); };
+  renderRoadNames();
   $('#pdfMake').onclick = () => makePdf(false);
   $('#pdfShare').onclick = () => makePdf(true);
+}
+function roadInfo() {
+  const r = S.roads || [], man = S.points.filter(p => p.type === 'jalan').length;
+  const names = [...new Set(r.map(x => x.name).filter(Boolean))];
+  return (r.length ? `${r.length} ruas jalan dari peta OpenStreetMap${names.length ? ' · ' + names.length + ' bernama' : ''}. ` : 'Belum ada jalan dari peta. ')
+    + (man ? `${man} titik jalan manual.` : 'Bisa juga tag titik jenis "Jalan" untuk jalan yang tidak ada di peta.');
+}
+function renderRoadNames() {
+  const names = [...new Set((S.roads || []).map(x => x.name).filter(Boolean))];
+  $('#rdNames').innerHTML = names.length ? `<label class="f">Nama jalan (bisa diubah)</label>` + names.map(n =>
+    `<input class="i" style="margin-bottom:6px" data-road="${esc(n)}" value="${esc(n)}">`).join('') : '';
+  $('#rdNames').querySelectorAll('[data-road]').forEach(inp => inp.onchange = () => {
+    const old = inp.dataset.road; S.roads.forEach(r => { if (r.name === old) r.name = inp.value.trim(); });
+    save(); renderRoadNames(); drawPreview();
+  });
+}
+async function fetchRoads() {
+  const pts = S.points.filter(p => p.lat != null && p.type !== 'label');
+  if (!pts.length) return toast('Belum ada titik survei');
+  if (!navigator.onLine) return toast('Perlu internet untuk mengambil jalan dari peta');
+  const m = 0.003;
+  const s = Math.min(...pts.map(p => p.lat)) - m, n = Math.max(...pts.map(p => p.lat)) + m;
+  const w = Math.min(...pts.map(p => p.lng)) - m, e = Math.max(...pts.map(p => p.lng)) + m;
+  const q = `[out:json][timeout:25];way["highway"]["highway"!~"footway|path|steps|cycleway|pedestrian|corridor|bridleway|proposed|construction|elevator"](${s.toFixed(5)},${w.toFixed(5)},${n.toFixed(5)},${e.toFixed(5)});out geom tags;`;
+  toast('Mengambil jalan dari peta…', 15000);
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const j = await res.json();
+    S.roads = (j.elements || []).filter(x => x.type === 'way' && x.geometry).map(x => ({
+      name: (x.tags && x.tags.name) || '', type: x.tags && x.tags.highway,
+      major: /trunk|primary|secondary|tertiary/.test((x.tags && x.tags.highway) || ''),
+      pts: x.geometry.map(g => [+g.lat.toFixed(6), +g.lon.toFixed(6)]) }));
+    S.showRoads = true; save();
+    toast(S.roads.length ? `${S.roads.length} ruas jalan ditambahkan` : 'Tidak ada data jalan di sekitar lokasi – pakai titik Jalan manual', 4000);
+    renderPdfTab();
+  } catch (err) { toast('Gagal mengambil jalan (server peta sibuk/tidak ada internet). Coba lagi.', 4000); }
 }
 function drawPreview() {
   const r = pv.getBoundingClientRect(); const d = window.devicePixelRatio || 1;
